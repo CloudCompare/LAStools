@@ -45,12 +45,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <TargetName>$(ProjectName)d</TargetName>
-    <OutDir>$(SolutionDir)VC12\lib\$(Platform)\</OutDir>
+    <OutDir>$(SolutionDir)VC14\lib\$(Platform)\</OutDir>
     <IntDir>VC14\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>$(SolutionDir)VC12\lib\$(Platform)\</OutDir>
+    <OutDir>$(SolutionDir)VC14\lib\$(Platform)\</OutDir>
     <IntDir>VC14\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
