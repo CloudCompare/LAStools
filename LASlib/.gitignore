@@ -10,3 +10,5 @@ LASlib.plg
 *.opensdf
 /VC11/
 /VC12/
+/VC14/
+/.vs/
