@@ -2,19 +2,19 @@
 ===============================================================================
 
   FILE:  laszip.cpp
-  
+
   CONTENTS:
-  
+
     This tool compresses and uncompresses LiDAR data in the LAS format to our
     losslessly compressed LAZ format.
 
   PROGRAMMERS:
-  
+
     martin.isenburg@rapidlasso.com  -  http://rapidlasso.com
-  
+
   COPYRIGHT:
-  
-    (c) 2007-2015, martin isenburg, rapidlasso - fast tools to catch reality
+
+    (c) 2007-2019, martin isenburg, rapidlasso - fast tools to catch reality
 
     This is free software; you can redistribute and/or modify it under the
     terms of the GNU Lesser General Licence as published by the Free Software
@@ -22,21 +22,23 @@
 
     This software is distributed WITHOUT ANY WARRANTY and without even the
     implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-  
+
   CHANGE HISTORY:
-  
-    29 March 2015 -- using LASwriterCompatible for LAS 1.4 compatibility mode  
-    9 September 2014 -- prototyping forward-compatible coding of LAS 1.4 points  
+
+    21 Juni 2019 -- allows compressing Trimble waveforms where first WDP offset is 0
+    7 September 2018 -- replaced calls to _strdup with calls to the LASCopyString macro
+    29 March 2015 -- using LASwriterCompatible for LAS 1.4 compatibility mode
+    9 September 2014 -- prototyping forward-compatible coding of LAS 1.4 points
     5 August 2011 -- possible to add/change projection info in command line
-    23 June 2011 -- turned on LASzip version 2.0 compressor with chunking 
+    23 June 2011 -- turned on LASzip version 2.0 compressor with chunking
     17 May 2011 -- enabling batch processing with wildcards or multiple file names
     25 April 2011 -- added chunking for random access decompression
-    23 January 2011 -- added LASreadOpener and LASwriteOpener 
+    23 January 2011 -- added LASreadOpener and LASwriteOpener
     16 December 2010 -- updated to use the new library
-    12 March 2009 -- updated to ask for input if started without arguments 
+    12 March 2009 -- updated to ask for input if started without arguments
     17 September 2008 -- updated to deal with LAS format version 1.2
     14 February 2007 -- created after picking flowers for the Valentine dinner
-  
+
 ===============================================================================
 */
 
@@ -71,15 +73,27 @@ typedef map<U64, OffsetSize> my_offset_size_map;
 void usage(bool error=false, bool wait=false)
 {
   fprintf(stderr,"usage:\n");
-  fprintf(stderr,"laszip *.las\n");
-  fprintf(stderr,"laszip *.laz\n");
-  fprintf(stderr,"laszip *.txt -iparse xyztiarn\n");
-  fprintf(stderr,"laszip lidar.las\n");
-  fprintf(stderr,"laszip lidar.laz -v\n");
+  fprintf(stderr,"laszip -i lidar.las\n");
+  fprintf(stderr,"laszip -i lidar.laz\n");
+  fprintf(stderr,"laszip -i lidar.las -nil\n");
+  fprintf(stderr,"laszip -i lidar.laz -size\n");
+  fprintf(stderr,"laszip -i lidar.laz -check\n");
+  fprintf(stderr,"laszip -i *.las\n");
+  fprintf(stderr,"laszip -i *.laz\n");
+  fprintf(stderr,"laszip -i *.las -odir compressed\n");
+  fprintf(stderr,"laszip -i *.laz -odir uncompressed\n");
+#ifdef COMPILE_WITH_MULTI_CORE
+  fprintf(stderr,"laszip -i *.las -odir compressed -cores 4\n");
+  fprintf(stderr,"laszip -i *.laz -odir uncompressed -cores 4\n");
+#endif
   fprintf(stderr,"laszip -i lidar.las -o lidar_zipped.laz\n");
   fprintf(stderr,"laszip -i lidar.laz -o lidar_unzipped.las\n");
   fprintf(stderr,"laszip -i lidar.las -stdout -olaz > lidar.laz\n");
   fprintf(stderr,"laszip -stdin -o lidar.laz < lidar.las\n");
+  fprintf(stderr,"laszip -i *.txt -iparse xyztiarn\n");
+  fprintf(stderr,"laszip -i las14.las -compatible -o las14compatible.laz\n");
+  fprintf(stderr,"laszip -i las14.laz -compatible -o las14compatible.laz\n");
+  fprintf(stderr,"laszip -i las14compatible.laz -remain_compatible -o las14compatible.las\n");
   fprintf(stderr,"laszip -h\n");
   if (wait)
   {
@@ -109,7 +123,7 @@ extern int laszip_gui(int argc, char *argv[], LASreadOpener* lasreadopener);
 #endif
 
 #ifdef COMPILE_WITH_MULTI_CORE
-extern int laszip_multi_core(int argc, char *argv[], GeoProjectionConverter* geoprojectionconverter, LASreadOpener* lasreadopener, LASwriteOpener* laswriteopener, int cores);
+extern int laszip_multi_core(int argc, char *argv[], GeoProjectionConverter* geoprojectionconverter, LASreadOpener* lasreadopener, LASwriteOpener* laswriteopener, int cores, BOOL cpu64);
 #endif
 
 int main(int argc, char *argv[])
@@ -121,6 +135,7 @@ int main(int argc, char *argv[])
 #endif
 #ifdef COMPILE_WITH_MULTI_CORE
   I32 cores = 1;
+  BOOL cpu64 = FALSE;
 #endif
   BOOL verbose = FALSE;
   bool waveform = false;
@@ -192,6 +207,9 @@ int main(int argc, char *argv[])
       fprintf(stderr, "LAStools (by martin@rapidlasso.com) version %d\n", LAS_TOOLS_VERSION);
       byebye();
     }
+    else if (strcmp(argv[i],"-fail") == 0)
+    {
+    }
     else if (strcmp(argv[i],"-gui") == 0)
     {
 #ifdef COMPILE_WITH_GUI
@@ -216,6 +234,15 @@ int main(int argc, char *argv[])
       fprintf(stderr, "WARNING: not compiled with multi-core batching. ignoring '-cores' ...\n");
       i++;
 #endif
+    }
+    else if (strcmp(argv[i],"-cpu64") == 0)
+    {
+#ifdef COMPILE_WITH_MULTI_CORE
+      cpu64 = TRUE;
+#else
+      fprintf(stderr, "WARNING: not compiled with 64 bit support. ignoring '-cpu64' ...\n");
+#endif
+      argv[i][0] = '\0';
     }
     else if (strcmp(argv[i],"-dry") == 0)
     {
@@ -345,8 +372,12 @@ int main(int argc, char *argv[])
     }
     else
     {
-      return laszip_multi_core(argc, argv, &geoprojectionconverter, &lasreadopener, &laswriteopener, cores);
+      return laszip_multi_core(argc, argv, &geoprojectionconverter, &lasreadopener, &laswriteopener, cores, cpu64);
     }
+  }
+  if (cpu64)
+  {
+    return laszip_multi_core(argc, argv, &geoprojectionconverter, &lasreadopener, &laswriteopener, 1, TRUE);
   }
 #endif
 
@@ -412,6 +443,30 @@ int main(int argc, char *argv[])
       usage(true, argc==1);
     }
 
+    // check correctness of file extension
+
+    if (lasreadopener.get_file_name())
+    {
+      const CHAR* file_name = lasreadopener.get_file_name();
+      I32 len = (I32)strlen(file_name);
+      while ((len >= 0) && (file_name[len] != '.')) len--;
+
+      if (lasreader->get_format() == LAS_TOOLS_FORMAT_LAZ)
+      {
+        if ((strncmp(file_name + len, ".laz", 4) != 0) && (strncmp(file_name + len, ".LAZ", 4) != 0))
+        {
+          fprintf(stderr, "WARNING: input LAZ file has wrong extension: '%s'\n", file_name);
+        }
+      }
+      else
+      {
+        if ((strncmp(file_name + len, ".las", 4) != 0) && (strncmp(file_name + len, ".LAS", 4) != 0))
+        {
+          fprintf(stderr, "WARNING: input LAS file has wrong extension: '%s'\n", file_name);
+        }
+      }
+    }
+
     // switch
 
     if (report_file_size)
@@ -452,7 +507,7 @@ int main(int argc, char *argv[])
     {
       I64 start_of_waveform_data_packet_record = 0;
 
-      // create output file name if no output was specified 
+      // create output file name if no output was specified
       if (!laswriteopener.active())
       {
         if (lasreadopener.get_file_name() == 0)
@@ -473,6 +528,14 @@ int main(int argc, char *argv[])
           }
         }
         laswriteopener.make_file_name(lasreadopener.get_file_name(), -2);
+      }
+
+      // make sure input and output filenames are not identical
+
+      if (lasreadopener.get_file_name() && laswriteopener.get_file_name() && (strcmp(lasreadopener.get_file_name(), laswriteopener.get_file_name()) == 0))
+      {
+        fprintf(stderr, "ERROR: input and output file name are identical: '%s'\n", lasreadopener.get_file_name());
+        usage(true);
       }
 
       // maybe set projection
@@ -503,7 +566,7 @@ int main(int argc, char *argv[])
         {
           // switch compression on/off
           U8 compression_type = (laswriteopener.get_format() == LAS_TOOLS_FORMAT_LAZ ? 1 : 0);
-          for (i = 0; i < 255; i++) if (lasreader->header.vlr_wave_packet_descr[i]) lasreader->header.vlr_wave_packet_descr[i]->setCompressionType(compression_type);
+          for (i = 1; i < 256; i++) if (lasreader->header.vlr_wave_packet_descr[i]) lasreader->header.vlr_wave_packet_descr[i]->setCompressionType(compression_type);
           // create laswaveform13writer
           laswaveform13writer = laswriteopener.open_waveform13(&lasreader->header);
           if (laswaveform13writer == 0)
@@ -513,7 +576,7 @@ int main(int argc, char *argv[])
             waveform = 0;
             // switch compression on/off back
             U8 compression_type = (laswriteopener.get_format() == LAS_TOOLS_FORMAT_LAZ ? 0 : 1);
-            for (i = 0; i < 255; i++) if (lasreader->header.vlr_wave_packet_descr[i]) lasreader->header.vlr_wave_packet_descr[i]->setCompressionType(compression_type);
+            for (i = 1; i < 256; i++) if (lasreader->header.vlr_wave_packet_descr[i]) lasreader->header.vlr_wave_packet_descr[i]->setCompressionType(compression_type);
           }
         }
         else
@@ -526,14 +589,14 @@ int main(int argc, char *argv[])
 
       if ((lasreader->header.version_major == 1) && (lasreader->header.version_minor >= 3))
       {
-        if (lasreader->header.global_encoding & 2) // if bit # 1 is set we have internal waveform data
+        if (lasreader->header.global_encoding & 0x0002) // if bit # 1 is set we have internal waveform data
         {
-          lasreader->header.global_encoding &= ~((U16)2); // remove internal bit
-          if (lasreader->header.start_of_waveform_data_packet_record) // offset to 
+          lasreader->header.global_encoding &= ~((U16)0x0002); // remove internal bit
+          if (lasreader->header.start_of_waveform_data_packet_record) // offset to
           {
             start_of_waveform_data_packet_record = lasreader->header.start_of_waveform_data_packet_record;
             lasreader->header.start_of_waveform_data_packet_record = 0;
-            lasreader->header.global_encoding |= ((U16)4); // set external bit
+            lasreader->header.global_encoding |= ((U16)0x0004); // set external bit
           }
         }
       }
@@ -543,8 +606,8 @@ int main(int argc, char *argv[])
       // open laswriter
 
       LASwriter* laswriter = 0;
-      
-      if (lasreader->header.point_data_format > 5)
+
+      if ((lasreader->header.point_data_format > 5) && !laswriteopener.get_native() && (laswriteopener.get_format() == LAS_TOOLS_FORMAT_LAZ))
       {
         LASwriterCompatibleDown* laswritercompatibledown = new LASwriterCompatibleDown();
         if (laswritercompatibledown->open(&lasreader->header, &laswriteopener, move_CRS, move_all))
@@ -586,7 +649,7 @@ int main(int argc, char *argv[])
       if (waveform)
       {
         U8 compression_type = (laswaveform13reader->is_compressed() ? 1 : 0);
-        for (i = 0; i < 255; i++) if (lasreader->header.vlr_wave_packet_descr[i]) lasreader->header.vlr_wave_packet_descr[i]->setCompressionType(compression_type);
+        for (i = 1; i < 256; i++) if (lasreader->header.vlr_wave_packet_descr[i]) lasreader->header.vlr_wave_packet_descr[i]->setCompressionType(compression_type);
 
         U64 last_offset = 0;
         U32 last_size = 60;
@@ -615,12 +678,12 @@ int main(int argc, char *argv[])
           if (lasreader->point.wavepacket.getIndex()) // if point is attached to a waveform
           {
             waves_referenced++;
-            if (lasreader->point.wavepacket.getOffset() == last_offset)
+            if ((lasreader->point.wavepacket.getOffset() == last_offset) && (waves_written))
             {
               lasreader->point.wavepacket.setOffset(new_offset);
               lasreader->point.wavepacket.setSize(new_size);
             }
-            else if (lasreader->point.wavepacket.getOffset() > last_offset)
+            else if ((lasreader->point.wavepacket.getOffset() > last_offset) || (!waves_written))
             {
               if (lasreader->point.wavepacket.getOffset() > (last_offset + last_size))
               {
@@ -735,7 +798,7 @@ int main(int argc, char *argv[])
             // create lax index
             LASindex lasindex;
             lasindex.prepare(lasquadtree, threshold);
-  
+
             // compress points and add to index
             while (lasreader->read_point())
             {
@@ -802,7 +865,7 @@ int main(int argc, char *argv[])
             // create lax index
             LASindex lasindex;
             lasindex.prepare(lasquadtree, threshold);
-  
+
             // compress points and add to index
             while (lasreader->read_point())
             {
@@ -866,7 +929,7 @@ int main(int argc, char *argv[])
       }
 
       delete laswriter;
-  
+
 #ifdef _WIN32
       if (verbose) fprintf(stderr,"%g secs to write %I64d bytes for '%s' with %I64d points of type %d\n", taketime()-start_time, bytes_written, laswriteopener.get_file_name(), lasreader->p_count, lasreader->header.point_data_format);
 #else
@@ -881,8 +944,8 @@ int main(int argc, char *argv[])
         char* wave_form_file_name;
         if (laswriteopener.get_file_name())
         {
-          wave_form_file_name = strdup(laswriteopener.get_file_name());
-          int len = strlen(wave_form_file_name);
+          wave_form_file_name = LASCopyString(laswriteopener.get_file_name());
+          I32 len = (I32)strlen(wave_form_file_name);
           if (wave_form_file_name[len-3] == 'L')
           {
             wave_form_file_name[len-3] = 'W';
@@ -898,7 +961,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-          wave_form_file_name = strdup("wave_form.wdp");
+          wave_form_file_name = LASCopyString("wave_form.wdp");
         }
         FILE* file = fopen(wave_form_file_name, "wb");
         if (file)
@@ -926,7 +989,7 @@ int main(int argc, char *argv[])
         laswriteopener.set_format((const CHAR*)NULL);
       }
     }
-  
+
     lasreader->close();
 
     delete lasreader;

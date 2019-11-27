@@ -117,11 +117,19 @@ SOURCE=.\src\lasfilter.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\src\lasignore.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\LASzip\src\lasindex.cpp
 # End Source File
 # Begin Source File
 
 SOURCE=..\LASzip\src\lasinterval.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\src\laskdtree.cpp
 # End Source File
 # Begin Source File
 
@@ -153,6 +161,10 @@ SOURCE=.\src\lasreader_las.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\src\lasreader_ply.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\src\lasreader_qfit.cpp
 # End Source File
 # Begin Source File
@@ -177,11 +189,23 @@ SOURCE=.\src\lasreaderpipeon.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\src\lasreaderstored.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\LASzip\src\lasreaditemcompressed_v1.cpp
 # End Source File
 # Begin Source File
 
 SOURCE=..\LASzip\src\lasreaditemcompressed_v2.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasreaditemcompressed_v3.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasreaditemcompressed_v4.cpp
 # End Source File
 # Begin Source File
 
@@ -210,6 +234,14 @@ SOURCE=..\LASzip\src\laswriteitemcompressed_v1.cpp
 # Begin Source File
 
 SOURCE=..\LASzip\src\laswriteitemcompressed_v2.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\laswriteitemcompressed_v3.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\laswriteitemcompressed_v4.cpp
 # End Source File
 # Begin Source File
 
@@ -246,6 +278,10 @@ SOURCE=.\src\laswritercompatible.cpp
 # Begin Source File
 
 SOURCE=..\LASzip\src\laszip.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\mydefs.cpp
 # End Source File
 # End Group
 # Begin Group "Header Files"
@@ -317,11 +353,19 @@ SOURCE=.\inc\lasfilter.hpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\inc\lasignore.hpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\LASzip\src\lasindex.hpp
 # End Source File
 # Begin Source File
 
 SOURCE=..\LASzip\src\lasinterval.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\inc\laskdtree.hpp
 # End Source File
 # Begin Source File
 
@@ -361,6 +405,10 @@ SOURCE=.\inc\lasreader_las.hpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\inc\lasreader_ply.hpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\inc\lasreader_qfit.hpp
 # End Source File
 # Begin Source File
@@ -385,6 +433,10 @@ SOURCE=.\inc\lasreaderpipeon.hpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\inc\lasreaderstored.hpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\LASzip\src\lasreaditem.hpp
 # End Source File
 # Begin Source File
@@ -394,6 +446,14 @@ SOURCE=..\LASzip\src\lasreaditemcompressed_v1.hpp
 # Begin Source File
 
 SOURCE=..\LASzip\src\lasreaditemcompressed_v2.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasreaditemcompressed_v3.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasreaditemcompressed_v4.hpp
 # End Source File
 # Begin Source File
 
@@ -430,6 +490,14 @@ SOURCE=..\LASzip\src\laswriteitemcompressed_v1.hpp
 # Begin Source File
 
 SOURCE=..\LASzip\src\laswriteitemcompressed_v2.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\laswriteitemcompressed_v3.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\laswriteitemcompressed_v4.hpp
 # End Source File
 # Begin Source File
 
@@ -482,6 +550,10 @@ SOURCE=..\LASzip\src\laszip_common_v2.hpp
 # Begin Source File
 
 SOURCE=..\LASzip\src\laszip_common_v3.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\laszip_decompress_selective_v3.hpp
 # End Source File
 # Begin Source File
 

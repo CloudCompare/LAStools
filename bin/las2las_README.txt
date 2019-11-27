@@ -20,7 +20,9 @@
   also use common EPSG codes with '-epsg 32754'. For LAS 1.4 it
   is important to '-set_ogc_wkt' which translates the GeoTIFF
   keys into an CRS string in the OGC WKT format and adds them as
-  the payload of the corresponding VLR.
+  the payload of the corresponding VLR. For LAS 1.4 files you
+  can use '-set_ogc_wkt_in_evlr' to put that string into the
+  EVLR instead of the VLR (but we don't recommend that).
 
   Another typical use is extract only first (-first_only) or only
   last (-last_only) returns. Extracting the first return is the
@@ -188,44 +190,66 @@ point.Z).
 
 other commandline arguments are
 
--auto_reoffset           : puts a reasonable offset in the header and translates the points accordingly
--reoffset 10000 40000 0  : puts a new offset into the header and translates the points accordingly
--rescale 0.01 0.01 0.01  : puts a new scale into the header and rescales the points accordingly
--clip_to_bounding_box    : removes all points that falls outsize the bouding box specified in the LAS header 
--repair_zero_returns     : sets return counts and number of returns that are zero to one
--start_at_point 100      : skips all points until point number 100
--start_at_point 900      : omits all points after point number 900
--subseq 20 100           : extract a subsequence of 100 points starting from point 20
--point_type 0            : force point type to be 0
--point_size 26           : force point size to be 26
--set_classification 0    : sets all classifications fields to zero
--set_user_data 0         : sets all user_data fields to zero
--remove_all_vlrs         : remove all VLRs
--remove_vlr 2            : remove VLR number 2 (couting starts at 0)
--remove_vlrs_from_to 0 2 : remove the first three VLRs
--remove_padding          : remove user-defined bytes before and after the header
--week_to_adjusted        : converts time stamps from GPS week to Adjusted Standard GPS 
--adjusted_to_week        : converts time stamps from Adjusted Standard GPS to GPS week
--scale_rgb_up            : multiplies all RGB values by 256 (to go from 8 bit to 16 bit numbers)
--scale_rgb_down          : divides all RGB values by 256 (to go from 16 bit to 8 bit numbers)
--set_version 1.2         : set LAS version number to 1.2
--wgs84                   : use datum WGS-84
--wgs72                   : use datum WGS-72
--nad83                   : use datum NAD83
--nad27                   : use datum NAD27
--utm 12T                 : input is UTM zone 12T 
--epsg 2972               : input is EPSG code 2972 (e.g. Reseau Geodesique Francais Guyane 1995)
--sp83 CO_S               : input is state plane NAD83 Colorado South
--sp27 SC_N               : input is state plane NAD27 South Carolina North 
--longlat                 : input is geometric coordinates in longitude/latitude 
--latlong                 : input is geometric coordinates in latitude/longitude
--ecef                    : input is geocentric (Earth-centered Earth-fixed)
--survey_feet             : input uses survey feet
--feet                    : input uses feet
--meter                   : input uses meter
--elevation_surveyfeet    : input uses survey feet for elevation
--elevation_feet          : input uses feet for elevation
--elevation_meter         : input uses meter for elevation
+-auto_reoffset                 : puts a reasonable offset in the header and translates the points accordingly
+-reoffset 10000 40000 0        : puts a new offset into the header and translates the points accordingly
+-rescale 0.01 0.01 0.01        : puts a new scale into the header and rescales the points accordingly
+-clip_to_bounding_box          : removes all points that falls outsize the bouding box specified in the LAS header 
+-repair_zero_returns           : sets return counts and number of returns that are zero to one
+-start_at_point 100            : skips all points until point number 100
+-start_at_point 900            : omits all points after point number 900
+-subseq 20 100                 : extract a subsequence of 100 points starting from point 20
+-set_point_type 0              : force point type to be 0
+-set_point_size 26             : force point size to be 26
+-set_classification 0          : sets all classifications fields to zero
+-set_user_data 0               : sets all user_data fields to zero
+-set_ogc_wkt                   : translate GeoTIFF keys into CRS string in OGC WKT format and add it as VLR
+-set_ogc_wkt_in_evlr           : same as above but adds it as LAS 1.4 EVLR instead. really not recommended!!!
+-remove_all_vlrs               : remove all VLRs
+-remove_vlr 2                  : remove VLR number 2 (couting starts at 0)
+-remove_vlrs_from_to 0 2       : remove the first three VLRs
+-remove_all_evlrs              : remove all EVLRs
+-remove_evlr 2                 : remove EVLR number 2 (couting starts at 0)
+-remove_evlrs_from_to 0 2      : remove the first three EVLRs
+-move_evlrs_to_vlrs            : move all EVLRs with small enough payload to VLR section
+-save_vlrs                     : saves all VLRs to a file called vlrs.vlr so they can be loaded into another file
+-load_vlrs                     : loads all VLRs from a file called vlrs.vlr and adds them to each processed file
+-remove_padding                : remove user-defined bytes before and after the header
+-week_to_adjusted              : converts time stamps from GPS week to Adjusted Standard GPS 
+-adjusted_to_week              : converts time stamps from Adjusted Standard GPS to GPS week
+-scale_rgb_up                  : multiplies all RGB values by 256 (to go from 8 bit to 16 bit numbers)
+-scale_rgb_down                : divides all RGB values by 256 (to go from 16 bit to 8 bit numbers)
+-set_version 1.2               : set LAS version number to 1.2
+-set_global_encoding_gps_bit 1 : sets bit in global encoding field specifying Adjusted GPS Standard time stamps
+-set_attribute_scale 0 0.1     : sets the scale of the *first* attribute in the extra bytes to 0.1 
+-set_attribute_offset 1 10.0   : sets the offset of the *second* attribute in the extra bytes to 10.0 
+-unset_attribute_scale 0       : unsets the scale of the *first* attribute in the extra bytes
+-unset_attribute_offset 1      : unsets the offset of the *second* attribute in the extra bytes
+-set_lastiling_buffer_flag 0   : sets buffer flag in LAStiling VLR (if it exists) to zero
+-dont_remove_empty_files       : does not remove files that have zero points remaining from disk
+-wgs84                         : use datum WGS-84
+-grs80                         : use datum GRS1980
+-wgs72                         : use datum WGS-72
+-nad83                         : use datum NAD83
+-nad83_2011                    : use datum NAD83_2011
+-nad83_harn                    : use datum NAD83_HARN
+-nad83_csrs                    : use datum NAD83_CSRS
+-nad27                         : use datum NAD27
+-etrs89                        : use datum ETRS89
+-gda94                         : use datum GDA94
+-osgb1936                      : use datum OSGB 1936
+-utm 12T                       : input is UTM zone 12T 
+-epsg 2972                     : input is EPSG code 2972 (e.g. Reseau Geodesique Francais Guyane 1995)
+-sp83 CO_S                     : input is state plane NAD83 Colorado South
+-sp27 SC_N                     : input is state plane NAD27 South Carolina North 
+-longlat                       : input is geometric coordinates in longitude/latitude 
+-latlong                       : input is geometric coordinates in latitude/longitude
+-ecef                          : input is geocentric (Earth-centered Earth-fixed)
+-survey_feet                   : input uses survey feet
+-feet                          : input uses feet
+-meter                         : input uses meter
+-elevation_surveyfeet          : input uses survey feet for elevation
+-elevation_feet                : input uses feet for elevation
+-elevation_meter               : input uses meter for elevation
 -target_utm 12T                  : output is UTM zone 12T 
 -target_epsg 2193                : output is EPSG code 2193 (e.g. NZGD2000)
 -target_sp83 CO_S                : output is state plane NAD83 Colorado South
@@ -241,7 +265,6 @@ other commandline arguments are
 -target_elevation_meter          : output uses meter for elevation
 -target_precision 0.001          : output uses one millimeter resolution for x and y
 -target_elevation_precision 0.02 : output uses two centimeter resolution for z
-
 -tm 609601.22 0.0 meter 33.75 -79 0.99996                 : specifies a transverse mercator projection
 -tm 1804461.942257 0.0 feet 0.8203047 -2.1089395 0.99996
 -lcc 609601.22 0.0 meter 33.75 -79 34.33333 36.16666      : specifies a lambertian conic confomal projection
@@ -250,7 +273,7 @@ other commandline arguments are
 
 for more info:
 
-D:\LAStools\bin>las2las -h
+C:\software\LAStools\bin>las2las -h
 Filter points based on their coordinates.
   -keep_tile 631000 4834000 1000 (ll_x ll_y size)
   -keep_circle 630250.00 4834750.00 100 (x y radius)
@@ -270,9 +293,11 @@ Filter points based on their coordinates.
   -drop_z_above 130.725 (max_z)
   -keep_xyz 620000 4830000 100 621000 4831000 200 (min_x min_y min_z max_x max_y max_z)
   -drop_xyz 620000 4830000 100 621000 4831000 200 (min_x min_y min_z max_x max_y max_z)
-Filter points based on their return number.
-  -first_only -keep_first -drop_first
-  -last_only -keep_last -drop_last
+Filter points based on their return numbering.
+  -keep_first -first_only -drop_first
+  -keep_last -last_only -drop_last
+  -keep_second_last -drop_second_last
+  -keep_first_of_many -keep_last_of_many
   -drop_first_of_many -drop_last_of_many
   -keep_middle -drop_middle
   -keep_return 1 2 3
@@ -281,19 +306,22 @@ Filter points based on their return number.
   -keep_double -drop_double
   -keep_triple -drop_triple
   -keep_quadruple -drop_quadruple
-  -keep_quintuple -drop_quintuple
+  -keep_number_of_returns 5
+  -drop_number_of_returns 0
 Filter points based on the scanline flags.
   -drop_scan_direction 0
-  -scan_direction_change_only
-  -edge_of_flight_line_only
+  -keep_scan_direction_change
+  -keep_edge_of_flight_line
 Filter points based on their intensity.
   -keep_intensity 20 380
   -drop_intensity_below 20
   -drop_intensity_above 380
   -drop_intensity_between 4000 5000
-Filter points based on their classification.
+Filter points based on classifications or flags.
   -keep_class 1 3 7
   -drop_class 4 2
+  -keep_extended_class 43
+  -drop_extended_class 129 135
   -drop_synthetic -keep_synthetic
   -drop_keypoint -keep_keypoint
   -drop_withheld -keep_withheld
@@ -301,6 +329,8 @@ Filter points based on their classification.
 Filter points based on their user data.
   -keep_user_data 1
   -drop_user_data 255
+  -keep_user_data_below 50
+  -keep_user_data_above 150
   -keep_user_data_between 10 20
   -drop_user_data_below 1
   -drop_user_data_above 100
@@ -315,6 +345,7 @@ Filter points based on their point source ID.
 Filter points based on their scan angle.
   -keep_scan_angle -15 15
   -drop_abs_scan_angle_above 15
+  -drop_abs_scan_angle_below 1
   -drop_scan_angle_below -15
   -drop_scan_angle_above 15
   -drop_scan_angle_between -25 -23
@@ -323,32 +354,51 @@ Filter points based on their gps time.
   -drop_gps_time_below 11.125
   -drop_gps_time_above 130.725
   -drop_gps_time_between 22.0 48.0
-Filter points based on their RGB/NIR channel.
+Filter points based on their RGB/CIR/NIR channels.
   -keep_RGB_red 1 1
+  -drop_RGB_red 5000 20000
   -keep_RGB_green 30 100
+  -drop_RGB_green 2000 10000
   -keep_RGB_blue 0 0
   -keep_RGB_nir 64 127
+  -keep_NDVI 0.2 0.7 -keep_NDVI_from_CIR -0.1 0.5
+  -keep_NDVI_intensity_is_NIR 0.4 0.8 -keep_NDVI_green_is_NIR -0.2 0.2
 Filter points based on their wavepacket.
   -keep_wavepacket 0
   -drop_wavepacket 3
+Filter points based on extra attributes.
+  -keep_attribute_above 0 5.0
+  -drop_attribute_below 1 1.5
 Filter points with simple thinning.
-  -keep_every_nth 2
+  -keep_every_nth 2 -drop_every_nth 3
   -keep_random_fraction 0.1
+  -keep_random_fraction 0.1 4711
   -thin_with_grid 1.0
-  -thin_with_time 0.001
+  -thin_pulses_with_time 0.0001
+  -thin_points_with_time 0.000001
+Boolean combination of filters.
+  -filter_and
 Transform coordinates.
   -translate_x -2.5
   -scale_z 0.3048
   -rotate_xy 15.0 620000 4100000 (angle + origin)
   -translate_xyz 0.5 0.5 0
   -translate_then_scale_y -0.5 1.001
+  -transform_helmert -199.87,74.79,246.62
+  -transform_helmert 598.1,73.7,418.2,0.202,0.045,-2.455,6.7
+  -transform_affine 0.9999652,0.903571,171.67,736.26
   -switch_x_y -switch_x_z -switch_y_z
   -clamp_z_below 70.5
   -clamp_z 70.5 72.5
   -copy_attribute_into_z 0
+  -add_attribute_to_z 1
+  -add_scaled_attribute_to_z 1 -1.2
+  -copy_intensity_into_z
+  -copy_user_data_into_z
 Transform raw xyz integers.
   -translate_raw_z 20
   -translate_raw_xyz 1 1 0
+  -translate_raw_xy_at_random 2 2
   -clamp_raw_z 500 800
 Transform intensity.
   -set_intensity 0
@@ -357,49 +407,87 @@ Transform intensity.
   -translate_then_scale_intensity 0.5 3.1
   -clamp_intensity 0 255
   -clamp_intensity_above 255
+  -copy_RGB_into_intensity
+  -copy_NIR_into_intensity
+  -copy_attribute_into_intensity 0
+  -bin_gps_time_into_intensity 0.5
 Transform scan_angle.
+  -set_scan_angle 0.0
   -scale_scan_angle 1.944445
   -translate_scan_angle -5
   -translate_then_scale_scan_angle -0.5 2.1
 Change the return number or return count of points.
   -repair_zero_returns
   -set_return_number 1
+  -set_extended_return_number 10
   -change_return_number_from_to 2 1
+  -change_extended_return_number_from_to 2 8
   -set_number_of_returns 2
+  -set_extended_number_of_returns 15
   -change_number_of_returns_from_to 0 2
+  -change_extended_number_of_returns_from_to 8 10
 Modify the classification.
   -set_classification 2
+  -set_extended_classification 41
   -change_classification_from_to 2 4
   -classify_z_below_as -5.0 7
   -classify_z_above_as 70.0 7
   -classify_z_between_as 2.0 5.0 4
   -classify_intensity_above_as 200 9
   -classify_intensity_below_as 30 11
+  -classify_intensity_between_as 500 900 15
+  -classify_attribute_below_as 0 -5.0 7
+  -classify_attribute_above_as 1 70.0 7
+  -classify_attribute_between_as 1 2.0 5.0 4
   -change_extended_classification_from_to 6 46
+  -move_ancient_to_extended_classification
 Change the flags.
   -set_withheld_flag 0
   -set_synthetic_flag 1
   -set_keypoint_flag 0
-  -set_extended_overlap_flag 1
+  -set_overlap_flag 1
 Modify the extended scanner channel.
-  -set_extended_scanner_channel 2
+  -set_scanner_channel 2
+  -copy_user_data_into_scanner_channel
 Modify the user data.
   -set_user_data 0
+  -scale_user_data 1.5
   -change_user_data_from_to 23 26
+  -change_user_data_from_to 23 26
+  -copy_attribute_into_user_data 1
+  -add_scaled_attribute_to_user_data 0 10.0
 Modify the point source ID.
   -set_point_source 500
   -change_point_source_from_to 1023 1024
   -copy_user_data_into_point_source
+  -copy_scanner_channel_into_point_source
+  -merge_scanner_channel_into_point_source
+  -split_scanner_channel_from_point_source
   -bin_Z_into_point_source 200
   -bin_abs_scan_angle_into_point_source 2
+  -bin_gps_time_into_point_source 5.0
 Transform gps_time.
   -set_gps_time 113556962.005715
   -translate_gps_time 40.50
   -adjusted_to_week
   -week_to_adjusted 1671
-Transform RGB colors.
-  -scale_rgb_down (by 256)
-  -scale_rgb_up (by 256)
+Transform RGB/NIR colors.
+  -set_RGB 255 0 127
+  -set_RGB_of_class 9 0 0 255
+  -scale_RGB 2 4 2
+  -scale_RGB_down (by 256)
+  -scale_RGB_up (by 256)
+  -switch_R_G -switch_R_B -switch_B_G
+  -copy_R_into_NIR -copy_R_into_intensity
+  -copy_G_into_NIR -copy_G_into_intensity
+  -copy_B_into_NIR -copy_B_into_intensity
+  -copy_intensity_into_NIR
+  -switch_RGBI_into_CIR
+  -switch_RGB_intensity_into_CIR
+Transform attributes in "Extra Bytes".
+  -scale_attribute 0 1.5
+  -translate_attribute 1 0.2
+  -copy_user_data_into_attribute 0
 Supported LAS Inputs
   -i lidar.las
   -i lidar.laz
@@ -433,14 +521,14 @@ Supported LAS Outputs
   -olas -olaz -otxt -obin -oqfit (specify format)
   -stdout (pipe to stdout)
   -nil    (pipe to NULL)
-LAStools (by martin@rapidlasso.com) version 160108
+LAStools (by martin@rapidlasso.com) version 190711
 usage:
 las2las -i *.las -utm 13N
 las2las -i *.laz -first_only -olaz
 las2las -i *.las -drop_return 4 5 -olaz
 las2las -latlong -target_utm 12T -i in.las -o out.las
 las2las -i in.laz -target_epsg 2972 -o out.laz
-las2las -point_type 0 -lof file_list.txt -merged -o out.las
+las2las -set_point_type 0 -lof file_list.txt -merged -o out.las
 las2las -remove_vlr 2 -scale_rgb_up -i in.las -o out.las
 las2las -i in.las -keep_xy 630000 4834500 630500 4835000 -keep_z 10 100 -o out.las
 las2las -i in.txt -iparse xyzit -keep_circle 630200 4834750 100 -oparse xyzit -o out.txt

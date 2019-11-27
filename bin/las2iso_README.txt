@@ -10,12 +10,27 @@
   For example, the option '-keep_class 2 3' will triangulate only
   the points of classification 2 or 3.
 
+  Note: to guarantee non-crossing iso-contours the '-simplify'
+  (or '-simplify_length) and the '-simplify_area' parameters
+  should not be used (or set to zero). This is because those
+  two options directly try to simplify individual contours after
+  they were extracted, which can lead to crossing. However, the
+  '-smooth' option operates on the TIN before extracting the
+  contours, and hence is safe. The '-clean' option simply removes
+  entire contours that are too short. You can get less wiggly
+  contours by first thinning the points with the '-contours' 
+  option available in lasthin.
+
   The resulting isocontours are stored either in ESRI's Shapefile
   format (-o contours.shp) or as a text file (-o contours.txt) 
   or in Google Earth's KML format for immediate visualization
   (-o contours.kml). For the latter georeferencing information
   is needed. If it is not provided in the LAS header then it can
   be specified in the command line (-utm 14T or -sp83 OH_S).
+
+  For SHP file output the z coordinates are by default not stored
+  as an attribute but as the PolylineZ value within the SHP file.
+  To create explicit attributes in a DBF file use '-odbf'.
 
   Optionally the contours can also be simplified, cleaned, and
   smoothed before output.
@@ -60,10 +75,16 @@
 
 example usage:
 
->> las2iso -i *.las -oshp -iso_every 2
+>> las2iso -i *.las -iso_every 2 -oshp 
 
 extracts 2 unit contours from all files that match *.las and stores
 the result in ESRI's Shapefile format.
+
+>> las2iso -i *.laz -iso_every 2 -oshp -odbf
+
+extracts 2 unit contours from all files that match *.laz and stores
+the result in ESRI's Shapefile format with the elevations of the
+contour line being an explicit attribues in the DBF file.
 
 >> las2iso -i *.txt -iparse ssxyz -oshp -iso_number 20
 

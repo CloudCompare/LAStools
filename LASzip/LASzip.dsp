@@ -43,7 +43,7 @@ RSC=rc.exe
 # PROP Ignore_Export_Lib 0
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /MT /W3 /GX /O2 /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LASZIPDLL_EXPORTS" /YX /FD /c
-# ADD CPP /nologo /W3 /GX /O2 /I "inc" /I "dll" /I "stl" /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LASZIPDLL_EXPORTS" /FD /c
+# ADD CPP /nologo /W3 /GX /O2 /I "inc" /I "dll" /I "stl" /D "WIN32" /D "DUNORDERED" /D "NDEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LASZIPDLL_EXPORTS" /FD /c
 # SUBTRACT CPP /YX
 # ADD BASE MTL /nologo /D "NDEBUG" /mktyplib203 /win32
 # ADD MTL /nologo /D "NDEBUG" /mktyplib203 /win32
@@ -57,7 +57,7 @@ LINK32=link.exe
 # ADD LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /dll /machine:I386
 # Begin Special Build Tool
 SOURCE="$(InputPath)"
-PostBuild_Cmds=copy Release\LASzip.dll dll\LASzip.dll	copy  Release\LASzip.dll example\Release\LASzip.dll
+PostBuild_Cmds=copy Release\LASzip.dll dll\LASzip.dll	copy  Release\LASzip.dll example\LASzip.dll
 # End Special Build Tool
 
 !ELSEIF  "$(CFG)" == "LASzip - Win32 Debug"
@@ -74,7 +74,7 @@ PostBuild_Cmds=copy Release\LASzip.dll dll\LASzip.dll	copy  Release\LASzip.dll e
 # PROP Ignore_Export_Lib 0
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /MTd /W3 /Gm /GX /ZI /Od /D "WIN32" /D "_DEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LASZIPDLL_EXPORTS" /YX /FD /GZ /c
-# ADD CPP /nologo /ML /W3 /Gm /GX /ZI /Od /I "inc" /I "dll" /I "stl" /D "WIN32" /D "_DEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LASZIPDLL_EXPORTS" /YX /FD /GZ /c
+# ADD CPP /nologo /ML /W3 /GX /Od /I "inc" /I "dll" /I "stl" /D "WIN32" /D "DUNORDERED" /D "_DEBUG" /D "_WINDOWS" /D "_MBCS" /D "_USRDLL" /D "LASZIPDLL_EXPORTS" /YX /FD /GZ /c
 # ADD BASE MTL /nologo /D "_DEBUG" /mktyplib203 /win32
 # ADD MTL /nologo /D "_DEBUG" /mktyplib203 /win32
 # ADD BASE RSC /l 0x409 /d "_DEBUG"
@@ -84,10 +84,10 @@ BSC32=bscmake.exe
 # ADD BSC32 /nologo
 LINK32=link.exe
 # ADD BASE LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /dll /debug /machine:I386 /pdbtype:sept
-# ADD LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /dll /debug /machine:I386 /pdbtype:sept
+# ADD LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /dll /incremental:no /debug /machine:I386 /force /pdbtype:sept
 # Begin Special Build Tool
 SOURCE="$(InputPath)"
-PostBuild_Cmds=copy Debug\LASzip.dll dll\LASzip.dll	copy Debug\LASzip.dll example\Debug\LASzip.dll
+PostBuild_Cmds=copy Debug\LASzip.dll dll\LASzip.dll	copy Debug\LASzip.dll example\LASzip.dll
 # End Special Build Tool
 
 !ENDIF 
@@ -118,6 +118,15 @@ SOURCE=.\src\integercompressor.cpp
 # Begin Source File
 
 SOURCE=.\src\lasindex.cpp
+
+!IF  "$(CFG)" == "LASzip - Win32 Release"
+
+# SUBTRACT CPP /D "DUNORDERED"
+
+!ELSEIF  "$(CFG)" == "LASzip - Win32 Debug"
+
+!ENDIF 
+
 # End Source File
 # Begin Source File
 
@@ -137,6 +146,14 @@ SOURCE=.\src\lasreaditemcompressed_v2.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\src\lasreaditemcompressed_v3.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\src\lasreaditemcompressed_v4.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\src\lasreadpoint.cpp
 # End Source File
 # Begin Source File
@@ -149,6 +166,14 @@ SOURCE=.\src\laswriteitemcompressed_v2.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\src\laswriteitemcompressed_v3.cpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\src\laswriteitemcompressed_v4.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\src\laswritepoint.cpp
 # End Source File
 # Begin Source File
@@ -158,6 +183,11 @@ SOURCE=.\src\laszip.cpp
 # Begin Source File
 
 SOURCE=.\src\laszip_dll.cpp
+# SUBTRACT CPP /I "stl"
+# End Source File
+# Begin Source File
+
+SOURCE=.\src\mydefs.cpp
 # End Source File
 # End Group
 # Begin Group "Header Files"
@@ -253,6 +283,14 @@ SOURCE=.\src\lasreaditemcompressed_v2.hpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\src\lasreaditemcompressed_v3.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\src\lasreaditemcompressed_v4.hpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\src\lasreaditemraw.hpp
 # End Source File
 # Begin Source File
@@ -273,6 +311,14 @@ SOURCE=.\src\laswriteitemcompressed_v2.hpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\src\laswriteitemcompressed_v3.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\src\laswriteitemcompressed_v4.hpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\src\laswriteitemraw.hpp
 # End Source File
 # Begin Source File
@@ -285,6 +331,10 @@ SOURCE=.\src\laszip.hpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\dll\laszip_api.h
+# End Source File
+# Begin Source File
+
 SOURCE=.\src\laszip_common_v1.hpp
 # End Source File
 # Begin Source File
@@ -293,7 +343,11 @@ SOURCE=.\src\laszip_common_v2.hpp
 # End Source File
 # Begin Source File
 
-SOURCE=.\dll\laszip_dll.h
+SOURCE=.\src\laszip_common_v3.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=.\src\laszip_decompress_selective_v3.hpp
 # End Source File
 # Begin Source File
 

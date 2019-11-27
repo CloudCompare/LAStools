@@ -32,7 +32,7 @@
   
   COPYRIGHT:
   
-    (c) 2011-14, martin isenburg, rapidlasso - fast tools to catch reality
+    (c) 2011-2019, martin isenburg, rapidlasso - fast tools to catch reality
 
     This is free software; you can redistribute and/or modify it under the
     terms of the GNU Lesser General Licence as published by the Free Software
@@ -43,6 +43,7 @@
   
   CHANGE HISTORY:
   
+     1 May 2017 -- 2nd example for selective decompression for new LAS 1.4 points 
     17 May 2011 -- enabling batch processing with wildcards or multiple file names
     29 April 2011 -- created after cable outage during the royal wedding (-:
   
@@ -55,6 +56,7 @@
 #include <string.h>
 
 #include "lasreader.hpp"
+#include "laszip_decompress_selective_v3.hpp"
 #include "lasindex.hpp"
 #include "lasquadtree.hpp"
 
@@ -94,7 +96,7 @@ extern int lasindex_gui(int argc, char *argv[], LASreadOpener* lasreadopener);
 #endif
 
 #ifdef COMPILE_WITH_MULTI_CORE
-extern int lasindex_multi_core(int argc, char *argv[], LASreadOpener* lasreadopener, int cores);
+extern int lasindex_multi_core(int argc, char *argv[], LASreadOpener* lasreadopener, int cores, BOOL cpu64);
 #endif
 
 int main(int argc, char *argv[])
@@ -105,12 +107,17 @@ int main(int argc, char *argv[])
 #endif
 #ifdef COMPILE_WITH_MULTI_CORE
   I32 cores = 1;
+  BOOL cpu64 = FALSE;
 #endif
-  bool verbose = false;
+  BOOL quiet = FALSE;
+  BOOL verbose = FALSE;
+  BOOL very_verbose = FALSE;
   F32 tile_size = 0.0f;
   U32 threshold = 1000;
   U32 minimum_points = 100000;
   I32 maximum_intervals = -20;
+  BOOL meta = FALSE;
+  BOOL dont_reindex = FALSE;
   BOOL append = FALSE;
   F64 start_time = 0.0;
   F64 total_start_time = 0.0;
@@ -151,12 +158,24 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[i],"-v") == 0 || strcmp(argv[i],"-verbose") == 0)
     {
-      verbose = true;
+      verbose = TRUE;
+    }
+    else if (strcmp(argv[i],"-vv") == 0 || strcmp(argv[i],"-very_verbose") == 0)
+    {
+      verbose = TRUE;
+      very_verbose = TRUE;
+    }
+    else if (strcmp(argv[i],"-quiet") == 0)
+    {
+      quiet = TRUE;
     }
     else if (strcmp(argv[i],"-version") == 0)
     {
       fprintf(stderr, "LAStools (by martin@rapidlasso.com) version %d\n", LAS_TOOLS_VERSION);
       byebye();
+    }
+    else if (strcmp(argv[i],"-fail") == 0)
+    {
     }
     else if (strcmp(argv[i],"-gui") == 0)
     {
@@ -182,6 +201,15 @@ int main(int argc, char *argv[])
       fprintf(stderr, "WARNING: not compiled with multi-core batching. ignoring '-cores' ...\n");
       i++;
 #endif
+    }
+    else if (strcmp(argv[i],"-cpu64") == 0)
+    {
+#ifdef COMPILE_WITH_MULTI_CORE
+      cpu64 = TRUE;
+#else
+      fprintf(stderr, "WARNING: not compiled with 64 bit support. ignoring '-cpu64' ...\n");
+#endif
+      argv[i][0] = '\0';
     }
     else if (strcmp(argv[i],"-tile_size") == 0)
     {
@@ -223,6 +251,14 @@ int main(int argc, char *argv[])
       i++;
       threshold = atoi(argv[i]);
     }
+    else if (strcmp(argv[i],"-meta") == 0)
+    {
+      meta = TRUE;
+    }
+    else if (strcmp(argv[i],"-dont_reindex") == 0)
+    {
+      dont_reindex = TRUE;
+    }
     else if (strcmp(argv[i],"-append") == 0)
     {
       append = TRUE;
@@ -232,6 +268,12 @@ int main(int argc, char *argv[])
       fprintf(stderr, "ERROR: cannot understand argument '%s'\n", argv[i]);
       byebye(true);
     }
+  }
+
+  if (lasreadopener.is_merged())
+  {
+    fprintf(stderr,"ERROR: on-the-fly merged input files merged not supported by lasindex\n");
+    byebye(true);
   }
 
 #ifdef COMPILE_WITH_GUI
@@ -248,14 +290,14 @@ int main(int argc, char *argv[])
     {
       fprintf(stderr,"WARNING: only %u input files. ignoring '-cores %d' ...\n", lasreadopener.get_file_name_number(), cores);
     }
-    else if (lasreadopener.is_merged())
-    {
-      fprintf(stderr,"WARNING: input files merged on-the-fly. ignoring '-cores %d' ...\n", cores);
-    }
     else
     {
-      return lasindex_multi_core(argc, argv, &lasreadopener, cores);
+      return lasindex_multi_core(argc, argv, &lasreadopener, cores, cpu64);
     }
+  }
+  if (cpu64)
+  {
+    return lasindex_multi_core(argc, argv, &lasreadopener, 1, TRUE);
   }
 #endif
 
@@ -266,6 +308,10 @@ int main(int argc, char *argv[])
     fprintf(stderr,"ERROR: no input specified\n");
     byebye(true, argc==1);
   }
+
+  // only decompress the one layer we need (for new LAS 1.4 point types only)
+
+  lasreadopener.set_decompress_selective(LASZIP_DECOMPRESS_SELECTIVE_CHANNEL_RETURNS_XY);
 
 /*
   // lasquadtree test
@@ -306,6 +352,39 @@ int main(int argc, char *argv[])
     total_start_time = taketime();
   }
 
+  U32 skipped = 0;
+  U32 indexed = 0;
+
+  FILE* file_meta = 0;
+
+  if (meta)
+  {
+    CHAR* meta_file_name_base = lasreadopener.get_file_name_base(0);
+    I32 len = 0;
+    if (meta_file_name_base)
+    {
+      len = (I32)strlen(meta_file_name_base);
+    }
+    CHAR* meta_file_name = (CHAR*)malloc(len + 9);
+    if (len)
+    {
+      sprintf(meta_file_name, "%s\\lax.txt", meta_file_name_base); 
+    }
+    else
+    {
+      sprintf(meta_file_name, "lax.txt"); 
+    }
+    free(meta_file_name_base);
+
+    file_meta = fopen(meta_file_name, "w");
+
+    if (file_meta == 0)
+    {
+      fprintf(stderr,"WARNING: cannot open '%s'. skipping creation of meta index ...\n", meta_file_name);
+    }
+    free(meta_file_name);
+  }
+
   while (lasreadopener.active())
   {
     if (verbose) start_time = taketime();
@@ -317,6 +396,26 @@ int main(int argc, char *argv[])
     {
       fprintf(stderr, "ERROR: could not open lasreader\n");
       byebye(true, argc==1);
+    }
+
+    if (file_meta)
+    {
+#ifdef _WIN32
+      fprintf(file_meta, "%u,%I64d,%lf,%lf,%lf,%lf,%s\012", lasreadopener.get_file_name_current()-1, lasreader->npoints, lasreader->header.min_x, lasreader->header.min_y, lasreader->header.max_x, lasreader->header.max_y, lasreadopener.get_file_name());
+#else
+      fprintf(file_meta, "%u,%lld,%lf,%lf,%lf,%lf,%s\012", lasreadopener.get_file_name_current()-1, lasreader->npoints, lasreader->header.min_x, lasreader->header.min_y, lasreader->header.max_x, lasreader->header.max_y, lasreadopener.get_file_name());
+#endif
+    }
+
+    if (dont_reindex)
+    {
+      if (lasreader->get_index())
+      {
+        if (!quiet) fprintf(stderr, "skipping already indexed file '%s'\n", lasreadopener.get_file_name());
+        delete lasreader;
+        skipped++;
+        continue;
+      }
     }
 
     // setup the quadtree
@@ -366,7 +465,7 @@ int main(int argc, char *argv[])
 
     // adaptive coarsening
 
-    lasindex.complete(minimum_points, maximum_intervals);
+    lasindex.complete(minimum_points, maximum_intervals, very_verbose);
 
     // write to file
 
@@ -379,12 +478,27 @@ int main(int argc, char *argv[])
       lasindex.write(lasreadopener.get_file_name());
     }
 
-    if (verbose) fprintf(stderr,"done with '%s'. took %g sec.\n", lasreadopener.get_file_name(), taketime()-start_time);
+    indexed++;
+
+    if (!quiet) fprintf(stderr,"done with '%s'. took %g sec.\n", lasreadopener.get_file_name(), taketime()-start_time);
+  }
+
+  if (file_meta)
+  {
+    fclose(file_meta);
+    file_meta = 0;
   }
   
-  if (verbose && lasreadopener.get_file_name_number() > 1)
+  if (!quiet && lasreadopener.get_file_name_number() > 1)
   {
-    fprintf(stderr,"done with %u files. total time %g sec.\n", lasreadopener.get_file_name_number(), taketime()-total_start_time);
+    if (dont_reindex)
+    {
+      fprintf(stderr,"done with %u files. skipped %u. indexed %u. total time %g sec.\n", lasreadopener.get_file_name_number(), skipped, indexed, taketime()-total_start_time);
+    }
+    else
+    {
+      fprintf(stderr,"done with %u files. total time %g sec.\n", lasreadopener.get_file_name_number(), taketime()-total_start_time);
+    }
   }
 
   byebye(false, argc==1);

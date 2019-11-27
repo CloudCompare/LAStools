@@ -4,9 +4,3 @@ LASlib.ncb
 LASlib.opt
 LASlib.plg
 *~
-*.user
-*.sdf
-*.suo
-*.opensdf
-/VC11/
-/VC12/

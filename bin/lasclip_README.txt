@@ -15,9 +15,18 @@
   overlaps and they must all form closed loops (e.g. last point
   and first point are identical).
 
+  Sometimes polygons describe donut-shaped objects such as lakes
+  with an island. Here the winding order of the lake with be CW
+  and that of the island will be CCW. In order to correcly clip
+  or classify only the lake (but now the island) the command line
+  option '-donuts' needs to be added.
+
   There is an option called '-split' that splits the input LiDAR
   (be it one LAS/LAZ file or several on-the-fly '-merged' LAS/LAZ
-  files) into one output file per polygon. 
+  files) into one output file per polygon. If your SHP file has an
+  associated DBF file then you can use '-split 0' to give output
+  files the name or number stored in attribute with index 0. Or
+  you can use '-split IDX' with IDX being the attribute's name.
 
   You can exclude certain point classes from the clipping or the
   reclassifying with option '-ignore_class 2' or '-ignore_class
@@ -96,6 +105,40 @@ following format:
 757741 3.69172e+006
 757800 3.6917e+006
 [...]
+
+****************************************************************
+
+overview of all tool-specific switches:
+
+-v                                   : more info reported in console
+-vv                                  : even more info reported in console
+-quiet                               : nothing reported in console
+-wait                                : wait for <ENTER> in the console at end of process
+-version                             : reports this tool's version number
+-fail                                : fail if license expired or invalid
+-gui                                 : start with files loaded into GUI
+-cores 4                             : process multiple inputs on 4 cores in parallel
+-ignore_class 0 1 3 5 6 7 9          : ignores points with specified classification codes
+-ignore_extended_class 42 43 45 67   : ignores points with specified extended classification codes
+-ignore_single                       : ignores single returns
+-ignore_first                        : ignores first returns
+-ignore_last                         : ignores last returns
+-ignore_first_of_many                : ignores first returns (but only those of multi-returns)
+-ignore_intermediate                 : ignores intermediate returns
+-ignore_last_of_many                 : ignores last returns (but only those of multi-returns)
+
+
+
+... more to come ...
+
+-dont_remove_empty_files             : do not remove files that have zero points remaining from disk
+-ilay                                : apply all LASlayers found in corresponding *.lay file on read
+-ilay 3                              : apply first three LASlayers found in corresponding *.lay file on read
+-ilaydir E:\my_layers                : look for corresponding *.lay file in directory E:\my_layers
+-olay                                : write or append classification changes to a LASlayers *.lay file
+-olaydir E:\my_layers                : write the output *.lay file in directory E:\my_layers
+
+****************************************************************
 
 
 for more info:

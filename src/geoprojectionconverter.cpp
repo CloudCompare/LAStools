@@ -2,21 +2,21 @@
 ===============================================================================
 
   FILE:  geoprojectionconverter.cpp
-  
+
   CONTENTS:
-  
+
     see corresponding header file
-  
+
   PROGRAMMERS:
-  
+
     martin.isenburg@rapidlasso.com  -  http://rapidlasso.com
     chuck.gantz@globalstar.com
     gpotts@imagelinks.com
     craig.larrimore@noaa.gov
-  
+
   COPYRIGHT:
-  
-    (c) 2007-2016, martin isenburg, rapidlasso - fast tools to catch reality
+
+    (c) 2007-2017, martin isenburg, rapidlasso - fast tools to catch reality
 
     This is free software; you can redistribute and/or modify it under the
     terms of the GNU Lesser General Licence as published by the Free Software
@@ -26,9 +26,9 @@
     implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
   CHANGE HISTORY:
-  
+
     see corresponding header file
-  
+
 ===============================================================================
 */
 #include "geoprojectionconverter.hpp"
@@ -43,10 +43,18 @@
 #include <unistd.h>
 #endif
 
+#if defined(_MSC_VER) && \
+    (_MSC_FULL_VER >= 150000000)
+#define LASCopyString _strdup
+#else
+#define LASCopyString strdup
+#endif
+
 static const double PI = 3.141592653589793238462643383279502884197169;
 static const double TWO_PI = PI * 2;
 static const double PI_OVER_2 = PI / 2;
 static const double PI_OVER_4 = PI / 4;
+static const double EPSILON = 0.0000000001;
 static const double deg2rad = PI / 180.0;
 static const double rad2deg = 180.0 / PI;
 
@@ -70,21 +78,21 @@ public:
   ReferenceEllipsoid(int id, char* name, double equatorialRadius, double eccentricitySquared, double inverseFlattening)
   {
     this->id = id;
-    this->name = name; 
+    this->name = name;
     this->equatorialRadius = equatorialRadius;
     this->eccentricitySquared = eccentricitySquared;
     this->inverseFlattening = inverseFlattening;
   }
   int id;
   char* name;
-  double equatorialRadius; 
-  double eccentricitySquared;  
-  double inverseFlattening;  
+  double equatorialRadius;
+  double eccentricitySquared;
+  double inverseFlattening;
 };
 
-static const ReferenceEllipsoid ellipsoid_list[] = 
+static const ReferenceEllipsoid ellipsoid_list[] =
 {
-  //  d, Ellipsoid name, Equatorial Radius, square of eccentricity, inverse flattening  
+  //  d, Ellipsoid name, Equatorial Radius, square of eccentricity, inverse flattening
   ReferenceEllipsoid( -1, "Placeholder", 0, 0, 0),  //placeholder to allow array indices to match id numbers
   ReferenceEllipsoid( 1, "Airy", 6377563.396, 0.00667054, 299.3249646),
   ReferenceEllipsoid( 2, "Australian National", 6378160.0, 0.006694542, 298.25),
@@ -511,7 +519,7 @@ public:
 
 static const StatePlaneLCC state_plane_lcc_nad27_list[] =
 {
-  // zone, false east [m], false north [m], ProjOrig(Lat), CentMerid(Long), 1st std para, 2nd std para 
+  // zone, false east [m], false north [m], ProjOrig(Lat), CentMerid(Long), 1st std para, 2nd std para
   StatePlaneLCC(PCS_NAD27_Alaska_zone_10, "AK_10",914401.8288,0,51,-176,51.83333333,53.83333333),
   StatePlaneLCC(PCS_NAD27_Arkansas_North, "AR_N",609601.2192,0,34.33333333,-92,34.93333333,36.23333333),
   StatePlaneLCC(PCS_NAD27_Arkansas_South, "AR_S",609601.2192,0,32.66666667,-92,33.3,34.76666667),
@@ -590,7 +598,7 @@ static const StatePlaneLCC state_plane_lcc_nad27_list[] =
 
 static const StatePlaneLCC state_plane_lcc_nad83_list[] =
 {
-  // geotiff key, zone, false east [m], false north [m], ProjOrig(Lat), CentMerid(Long), 1st std para, 2nd std para 
+  // geotiff key, zone, false east [m], false north [m], ProjOrig(Lat), CentMerid(Long), 1st std para, 2nd std para
   StatePlaneLCC(PCS_NAD83_Alaska_zone_10, "AK_10",1000000,0,51.000000,-176.000000,51.833333,53.833333),
   StatePlaneLCC(PCS_NAD83_Arkansas_North, "AR_N",400000,0,34.333333,-92.000000,34.933333,36.233333),
   StatePlaneLCC(PCS_NAD83_Arkansas_South, "AR_S",400000,400000,32.666667,-92.000000,33.300000,34.766667),
@@ -806,24 +814,42 @@ static const StatePlaneTM state_plane_tm_nad83_list[] =
 static const short EPSG_CH1903_LV03 = 21781;
 static const short EPSG_EOV_HD72 = 23700;
 
-bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoProjectionGeoKeys* geo_keys, char* geo_ascii_params, double* geo_double_params, char* description)
+bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, const GeoProjectionGeoKeys* geo_keys, char* geo_ascii_params, double* geo_double_params, char* description)
 {
   bool user_defined_ellipsoid = false;
   int user_defined_projection = 0;
   int offsetProjStdParallel1GeoKey = -1;
   int offsetProjStdParallel2GeoKey = -1;
   int offsetProjNatOriginLatGeoKey = -1;
+  int offsetProjNatOriginLongGeoKey = -1;
   int offsetProjFalseEastingGeoKey = -1;
   int offsetProjFalseNorthingGeoKey = -1;
+  int offsetProjCenterLatGeoKey = -1;
   int offsetProjCenterLongGeoKey = -1;
+  int offsetProjFalseOriginLongGeoKey = -1;
+  int offsetProjFalseOriginLatGeoKey = -1;
+  int offsetProjFalseOriginEastingGeoKey = -1;
+  int offsetProjFalseOriginNorthingGeoKey = -1;
   int offsetProjScaleAtNatOriginGeoKey = -1;
+  int offsetProjScaleAtCenterGeoKey = -1;
+  int offsetProjAzimuthAngleGeoKey = -1;
+  int offsetProjRectifiedGridAngleGeoKey = -1;
   bool has_projection = false;
   int ellipsoid = -1;
   int datum_code = -1;
   int gcs_code = -1;
 
   this->num_geo_keys = num_geo_keys;
-  this->geo_keys = geo_keys;
+  if (this->geo_keys) delete [] this->geo_keys;
+  if (num_geo_keys)
+  {
+    this->geo_keys = new GeoProjectionGeoKeys[num_geo_keys];
+    memcpy(this->geo_keys, geo_keys, sizeof(GeoProjectionGeoKeys)*num_geo_keys);
+  }
+  else
+  {
+    this->geo_keys = 0;
+  }
   this->geo_ascii_params = geo_ascii_params;
   this->geo_double_params = geo_double_params;
 
@@ -832,18 +858,7 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
     switch (geo_keys[i].key_id)
     {
     case 1024: // GTModelTypeGeoKey
-      if (geo_keys[i].value_offset == 2) // ModelTypeGeographic
-      {
-        has_projection = set_longlat_projection(description);
-      }
-      else if (geo_keys[i].value_offset == 3) // ModelTypeGeocentric
-      {
-        has_projection = set_ecef_projection(description);
-      }
-      else if (geo_keys[i].value_offset == 0) // ModelTypeUndefined
-      {
-        has_projection = set_no_projection(description);
-      }
+      has_projection = set_GTModelTypeGeoKey(geo_keys[i].value_offset, description);
       break;
     case 3072: // ProjectedCSTypeGeoKey
       has_projection = set_ProjectedCSTypeGeoKey(geo_keys[i].value_offset, description);
@@ -854,7 +869,7 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
     case 4099: // VerticalUnitsGeoKey
       set_VerticalUnitsGeoKey(geo_keys[i].value_offset);
       break;
-    case 4096: // VerticalCSTypeGeoKey 
+    case 4096: // VerticalCSTypeGeoKey
       set_VerticalCSTypeGeoKey(geo_keys[i].value_offset);
       break;
     case 2048: // GeographicTypeGeoKey
@@ -878,16 +893,45 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
       case 4283: // GCS_GDA94
         gcs_code = GEO_GCS_GDA94;
         break;
+      case 4140: // Datum_NAD83_CSRS
+      case 4617: // Datum_NAD83_CSRS
+        datum_code = GEO_GCS_NAD83_CSRS;
+        break;
+      case 4759: // NAD83_2007
+      case 4893: // NAD83_2007_3D
+        gcs_code = GEO_GCS_NAD83_NSRS2007;
+        break;
+      case 4957: // NAD83_HARN_3D
+      case 4152: // NAD83_HARN
+        gcs_code = GEO_GCS_NAD83_HARN;
+        break;
+      case 6783: // CORS96
+      case 6782: // CORS96 3D
+        gcs_code = GEO_GCS_NAD83_CORS96;
+        break;
+      case 6318: // NAD83_2011
+      case 6319: // NAD83_2011_3D
+        gcs_code = GEO_GCS_NAD83_2011;
+        break;
+      case 6322: // NAD83_PA11
+        gcs_code = GEO_GCS_NAD83_PA11;
+        break;
       case 4030: // GCSE_WGS84 (unknown datum based on WGS 84 ellipsoid)
         ellipsoid = GEO_ELLIPSOID_WGS84;
         break;
       case 4019: // GCSE_GRS1980 (unknown datum based on GRS1980 ellipsoid)
         ellipsoid = GEO_ELLIPSOID_GRS1980;
         break;
+      case 4619: // GCS_SWEREF99
+        gcs_code = GEO_GCS_SWEREF99;
+        break;
+      case 4167: // GCS_NZGD2000
+        gcs_code = GEO_GCS_NZGD2000;
+        break;
       case 4001: // GCSE_Airy1830
         ellipsoid = GEO_ELLIPSOID_AIRY;
         break;
-      case 4002: // GCSE_AiryModified1849 
+      case 4002: // GCSE_AiryModified1849
         ellipsoid = 16;
         break;
       case 4003: // GCSE_AustralianNationalSpheroid
@@ -934,7 +978,7 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
         fprintf(stderr, "GeographicTypeGeoKey: look-up for %d not implemented\n", geo_keys[i].value_offset);
       }
       break;
-    case 2050: // GeogGeodeticDatumGeoKey 
+    case 2050: // GeogGeodeticDatumGeoKey
       switch (geo_keys[i].value_offset)
       {
       case 32767: // user-defined GCS
@@ -955,11 +999,20 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
       case 6283: // Datum_Geocentric_Datum_of_Australia_1994
         datum_code = GEO_GCS_GDA94;
         break;
+      case 6140: // Datum_NAD83_CSRS
+        datum_code = GEO_GCS_NAD83_CSRS;
+        break;
       case 6030: // DatumE_WGS84
         ellipsoid = GEO_ELLIPSOID_WGS84;
         break;
       case 6019: // DatumE_GRS1980
         ellipsoid = GEO_ELLIPSOID_GRS1980;
+        break;
+      case 6167: // Datum_SWEREF99
+        datum_code = GEO_GCS_SWEREF99;
+        break;
+      case 6619: // Datum_NZGD2000
+        datum_code = GEO_GCS_NZGD2000;
         break;
       case 6202: // Datum_Australian_Geodetic_Datum_1966
       case 6203: // Datum_Australian_Geodetic_Datum_1984
@@ -1015,7 +1068,7 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
         fprintf(stderr, "GeogGeodeticDatumGeoKey: look-up for %d not implemented\n", geo_keys[i].value_offset);
       }
       break;
-    case 2052: // GeogLinearUnitsGeoKey 
+    case 2052: // GeogLinearUnitsGeoKey
       switch (geo_keys[i].value_offset)
       {
       case 9001: // Linear_Meter
@@ -1047,11 +1100,14 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
       case 11: // CT_AlbersEqualArea
         user_defined_projection = 11;
         break;
+      case 16: // CT_ObliqueStereographic
+        user_defined_projection = 16;
+        break;
       case 2: // CT_TransvMercator_Modified_Alaska
         fprintf(stderr, "ProjCoordTransGeoKey: CT_TransvMercator_Modified_Alaska not implemented\n");
         break;
       case 3: // CT_ObliqueMercator
-        fprintf(stderr, "ProjCoordTransGeoKey: CT_ObliqueMercator not implemented\n");
+        user_defined_projection = 3;
         break;
       case 4: // CT_ObliqueMercator_Laborde
         fprintf(stderr, "ProjCoordTransGeoKey: CT_ObliqueMercator_Laborde not implemented\n");
@@ -1082,9 +1138,6 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
         break;
       case 15: // CT_PolarStereographic
         fprintf(stderr, "ProjCoordTransGeoKey: CT_PolarStereographic not implemented\n");
-        break;
-      case 16: // CT_ObliqueStereographic
-        fprintf(stderr, "ProjCoordTransGeoKey: CT_ObliqueStereographic not implemented\n");
         break;
       case 17: // CT_Equirectangular
         fprintf(stderr, "ProjCoordTransGeoKey: CT_Equirectangular not implemented\n");
@@ -1128,7 +1181,10 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
       break;
     case 3079: // ProjStdParallel2GeoKey
       offsetProjStdParallel2GeoKey = geo_keys[i].value_offset;
-      break;        
+      break;
+    case 3080 : // ProjNatOriginLongGeoKey
+      offsetProjNatOriginLongGeoKey = geo_keys[i].value_offset;
+      break;
     case 3081: // ProjNatOriginLatGeoKey
       offsetProjNatOriginLatGeoKey = geo_keys[i].value_offset;
       break;
@@ -1138,11 +1194,35 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
     case 3083: // ProjFalseNorthingGeoKey
       offsetProjFalseNorthingGeoKey = geo_keys[i].value_offset;
       break;
+    case 3084: // ProjFalseOriginLongGeoKey
+      offsetProjFalseOriginLongGeoKey = geo_keys[i].value_offset;
+      break;
+    case 3085: // ProjFalseOriginLatGeoKey
+      offsetProjFalseOriginLatGeoKey = geo_keys[i].value_offset;
+      break;
+    case 3086: // ProjFalseOriginEastingGeoKey
+      offsetProjFalseOriginEastingGeoKey = geo_keys[i].value_offset;
+      break;
+    case 3087: // ProjFalseOriginNorthingGeoKey
+      offsetProjFalseOriginNorthingGeoKey = geo_keys[i].value_offset;
+      break;
     case 3088: // ProjCenterLongGeoKey
       offsetProjCenterLongGeoKey = geo_keys[i].value_offset;
       break;
+    case 3089: // ProjCenterLatGeoKey
+      offsetProjCenterLatGeoKey = geo_keys[i].value_offset;
+      break;
     case 3092: // ProjScaleAtNatOriginGeoKey
       offsetProjScaleAtNatOriginGeoKey = geo_keys[i].value_offset;
+      break;
+    case 3093: // ProjScaleAtCenterGeoKey
+      offsetProjScaleAtCenterGeoKey = geo_keys[i].value_offset;
+      break;
+    case 3094: // ProjAzimuthAngleGeoKey
+      offsetProjAzimuthAngleGeoKey = geo_keys[i].value_offset;
+      break;
+    case 3096: // ProjRectifiedGridAngleGeoKey
+      offsetProjRectifiedGridAngleGeoKey = geo_keys[i].value_offset;
       break;
     }
   }
@@ -1181,23 +1261,93 @@ bool GeoProjectionConverter::set_projection_from_geo_keys(int num_geo_keys, GeoP
     }
     else if (user_defined_projection == 8)
     {
-      if ((offsetProjFalseEastingGeoKey >= 0) &&
-          (offsetProjFalseNorthingGeoKey >= 0) &&
-          (offsetProjNatOriginLatGeoKey >= 0) &&
-          (offsetProjCenterLongGeoKey >= 0) &&
+      if (((offsetProjFalseEastingGeoKey >= 0) || (offsetProjFalseOriginEastingGeoKey >= 0)) &&
+          ((offsetProjFalseNorthingGeoKey >= 0) || (offsetProjFalseOriginNorthingGeoKey >= 0)) &&
+          ((offsetProjNatOriginLatGeoKey >= 0) || (offsetProjFalseOriginLatGeoKey >= 0)) &&
+          ((offsetProjCenterLongGeoKey >= 0) || (offsetProjNatOriginLongGeoKey >= 0) || (offsetProjFalseOriginLongGeoKey >= 0)) &&
           (offsetProjStdParallel1GeoKey >= 0) &&
           (offsetProjStdParallel2GeoKey >= 0))
       {
-        double falseEastingMeter = geo_double_params[offsetProjFalseEastingGeoKey] * coordinates2meter;
-        double falseNorthingMeter = geo_double_params[offsetProjFalseNorthingGeoKey] * coordinates2meter;
-        double latOriginDeg = geo_double_params[offsetProjNatOriginLatGeoKey];
-        double longOriginDeg = geo_double_params[offsetProjCenterLongGeoKey];
+        double falseEastingMeter = ((offsetProjFalseEastingGeoKey >= 0) ? geo_double_params[offsetProjFalseEastingGeoKey] * coordinates2meter : geo_double_params[offsetProjFalseOriginEastingGeoKey] * coordinates2meter);
+        double falseNorthingMeter = ((offsetProjFalseNorthingGeoKey >= 0) ? geo_double_params[offsetProjFalseNorthingGeoKey] * coordinates2meter : geo_double_params[offsetProjFalseOriginNorthingGeoKey] * coordinates2meter);
+        double latOriginDeg = ((offsetProjNatOriginLatGeoKey >= 0) ? geo_double_params[offsetProjNatOriginLatGeoKey] : geo_double_params[offsetProjFalseOriginLatGeoKey]);
+        double longOriginDeg = ((offsetProjCenterLongGeoKey >= 0) ? geo_double_params[offsetProjCenterLongGeoKey] : ((offsetProjNatOriginLongGeoKey >= 0) ? geo_double_params[offsetProjNatOriginLongGeoKey] : geo_double_params[offsetProjFalseOriginLongGeoKey]));
+        if ((longOriginDeg == 0.0) && (offsetProjNatOriginLongGeoKey >= 0)) longOriginDeg = geo_double_params[offsetProjNatOriginLongGeoKey];
         double firstStdParallelDeg = geo_double_params[offsetProjStdParallel1GeoKey];
         double secondStdParallelDeg = geo_double_params[offsetProjStdParallel2GeoKey];
         set_lambert_conformal_conic_projection(falseEastingMeter, falseNorthingMeter, latOriginDeg, longOriginDeg, firstStdParallelDeg, secondStdParallelDeg);
         if (description)
         {
           sprintf(description, "generic lambert conformal conic");
+        }
+        has_projection = true;
+      }
+    }
+    else if (user_defined_projection == 11)
+    {
+      if ((offsetProjFalseEastingGeoKey >= 0) &&
+          (offsetProjFalseNorthingGeoKey >= 0) &&
+          (offsetProjNatOriginLatGeoKey >= 0) &&
+          ((offsetProjCenterLongGeoKey >= 0) || (offsetProjNatOriginLongGeoKey >= 0)) &&
+          (offsetProjStdParallel1GeoKey >= 0) &&
+          (offsetProjStdParallel2GeoKey >= 0))
+      {
+        double falseEastingMeter = geo_double_params[offsetProjFalseEastingGeoKey] * coordinates2meter;
+        double falseNorthingMeter = geo_double_params[offsetProjFalseNorthingGeoKey] * coordinates2meter;
+        double latOriginDeg = geo_double_params[offsetProjNatOriginLatGeoKey];
+        double longOriginDeg = ((offsetProjCenterLongGeoKey >= 0) ? geo_double_params[offsetProjCenterLongGeoKey] : geo_double_params[offsetProjNatOriginLongGeoKey]);
+        if ((longOriginDeg == 0.0) && (offsetProjNatOriginLongGeoKey >= 0)) longOriginDeg = geo_double_params[offsetProjNatOriginLongGeoKey];
+        double firstStdParallelDeg = geo_double_params[offsetProjStdParallel1GeoKey];
+        double secondStdParallelDeg = geo_double_params[offsetProjStdParallel2GeoKey];
+        set_albers_equal_area_conic_projection(falseEastingMeter, falseNorthingMeter, latOriginDeg, longOriginDeg, firstStdParallelDeg, secondStdParallelDeg);
+        if (description)
+        {
+          sprintf(description, "generic albers equal area");
+        }
+        has_projection = true;
+      }
+    }
+    else if (user_defined_projection == 16)
+    {
+      if ((offsetProjFalseEastingGeoKey >= 0) &&
+          (offsetProjFalseNorthingGeoKey >= 0) &&
+          (offsetProjNatOriginLatGeoKey >= 0) &&
+          ((offsetProjCenterLongGeoKey >= 0) || (offsetProjNatOriginLongGeoKey >= 0)) &&
+          (offsetProjScaleAtNatOriginGeoKey >= 0))
+      {
+        double falseEastingMeter = geo_double_params[offsetProjFalseEastingGeoKey] * coordinates2meter;
+        double falseNorthingMeter = geo_double_params[offsetProjFalseNorthingGeoKey] * coordinates2meter;
+        double latOriginDeg = geo_double_params[offsetProjNatOriginLatGeoKey];
+        double longMeridianDeg = ((offsetProjCenterLongGeoKey >= 0) ? geo_double_params[offsetProjCenterLongGeoKey] : geo_double_params[offsetProjNatOriginLongGeoKey]);
+        double scaleFactor = geo_double_params[offsetProjScaleAtNatOriginGeoKey];
+        set_oblique_stereographic_projection(falseEastingMeter, falseNorthingMeter, latOriginDeg, longMeridianDeg, scaleFactor);
+        if (description)
+        {
+          sprintf(description, "generic oblique stereographic");
+        }
+        has_projection = true;
+      }
+    }
+    else if (user_defined_projection == 3)
+    {
+      if ((offsetProjFalseEastingGeoKey >= 0) &&
+          (offsetProjFalseNorthingGeoKey >= 0) &&
+          (offsetProjCenterLatGeoKey >= 0) &&
+          (offsetProjCenterLongGeoKey >= 0) &&
+          (offsetProjAzimuthAngleGeoKey >= 0) &&
+          (offsetProjScaleAtCenterGeoKey >= 0))
+      {
+        double falseEastingMeter = geo_double_params[offsetProjFalseEastingGeoKey] * coordinates2meter;
+        double falseNorthingMeter = geo_double_params[offsetProjFalseNorthingGeoKey] * coordinates2meter;
+        double latCenterDeg = geo_double_params[offsetProjCenterLatGeoKey];
+        double longCenterDeg = geo_double_params[offsetProjCenterLongGeoKey];
+        double azimuthDeg = geo_double_params[offsetProjAzimuthAngleGeoKey];
+        double rectifiedGridAngleDeg = (offsetProjRectifiedGridAngleGeoKey >= 0 ? geo_double_params[offsetProjRectifiedGridAngleGeoKey] : azimuthDeg);
+        double scaleFactor = geo_double_params[offsetProjScaleAtCenterGeoKey];
+        set_hotine_oblique_mercator_projection(falseEastingMeter, falseNorthingMeter, latCenterDeg, longCenterDeg, azimuthDeg, rectifiedGridAngleDeg, scaleFactor);
+        if (description)
+        {
+          sprintf(description, "generic hotine oblique mercator");
         }
         has_projection = true;
       }
@@ -1273,7 +1423,7 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[0].count = 1;
         (*geo_keys)[0].value_offset = 1; // ModelTypeProjected
 
-        // user-defined custom LCC projection 
+        // user-defined custom LCC projection
         (*geo_keys)[1].key_id = 3072; // ProjectedCSTypeGeoKey
         (*geo_keys)[1].tiff_tag_location = 0;
         (*geo_keys)[1].count = 1;
@@ -1283,13 +1433,13 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[2].key_id = 3075; // ProjCoordTransGeoKey
         (*geo_keys)[2].tiff_tag_location = 0;
         (*geo_keys)[2].count = 1;
-        (*geo_keys)[2].value_offset = 8; // CT_LambertConfConic_2SP 
+        (*geo_keys)[2].value_offset = 8; // CT_LambertConfConic_2SP
 
         // which units do we use
         (*geo_keys)[3].key_id = 3076; // ProjCoordTransGeoKey
         (*geo_keys)[3].tiff_tag_location = 0;
         (*geo_keys)[3].count = 1;
-        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source); 
+        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source);
 
         // here come the 6 double parameters
 
@@ -1372,7 +1522,7 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[0].count = 1;
         (*geo_keys)[0].value_offset = 1; // ModelTypeProjected
 
-        // user-defined custom TM projection 
+        // user-defined custom TM projection
         (*geo_keys)[1].key_id = 3072; // ProjectedCSTypeGeoKey
         (*geo_keys)[1].tiff_tag_location = 0;
         (*geo_keys)[1].count = 1;
@@ -1388,7 +1538,7 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[3].key_id = 3076; // ProjCoordTransGeoKey
         (*geo_keys)[3].tiff_tag_location = 0;
         (*geo_keys)[3].count = 1;
-        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source); 
+        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source);
 
         // here come the 5 double parameters
 
@@ -1465,7 +1615,7 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[0].count = 1;
         (*geo_keys)[0].value_offset = 1; // ModelTypeProjected
 
-        // user-defined custom AEAC projection 
+        // user-defined custom AEAC projection
         (*geo_keys)[1].key_id = 3072; // ProjectedCSTypeGeoKey
         (*geo_keys)[1].tiff_tag_location = 0;
         (*geo_keys)[1].count = 1;
@@ -1475,13 +1625,13 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[2].key_id = 3075; // ProjCoordTransGeoKey
         (*geo_keys)[2].tiff_tag_location = 0;
         (*geo_keys)[2].count = 1;
-        (*geo_keys)[2].value_offset = 11; // CT_AlbersEqualArea 
+        (*geo_keys)[2].value_offset = 11; // CT_AlbersEqualArea
 
         // which units do we use
         (*geo_keys)[3].key_id = 3076; // ProjCoordTransGeoKey
         (*geo_keys)[3].tiff_tag_location = 0;
         (*geo_keys)[3].count = 1;
-        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source); 
+        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source);
 
         // here come the 6 double parameters
 
@@ -1555,7 +1705,7 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
 
         num_geo_keys = 13 + (vertical_geokey ? 1 : 0);
         (*geo_keys) = (GeoProjectionGeoKeys*)malloc(sizeof(GeoProjectionGeoKeys)*num_geo_keys);
-        num_geo_double_params = 6;
+        num_geo_double_params = 7;
         (*geo_double_params) = (double*)malloc(sizeof(double)*num_geo_double_params);
 
         // projected coordinates
@@ -1564,7 +1714,7 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[0].count = 1;
         (*geo_keys)[0].value_offset = 1; // ModelTypeProjected
 
-        // user-defined custom LCC projection 
+        // user-defined custom HOM projection
         (*geo_keys)[1].key_id = 3072; // ProjectedCSTypeGeoKey
         (*geo_keys)[1].tiff_tag_location = 0;
         (*geo_keys)[1].count = 1;
@@ -1574,84 +1724,89 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
         (*geo_keys)[2].key_id = 3075; // ProjCoordTransGeoKey
         (*geo_keys)[2].tiff_tag_location = 0;
         (*geo_keys)[2].count = 1;
-        (*geo_keys)[2].value_offset = 11; // CT_AlbersEqualArea 
+        (*geo_keys)[2].value_offset = 3; // CT_ObliqueMercator
 
         // which units do we use
         (*geo_keys)[3].key_id = 3076; // ProjCoordTransGeoKey
         (*geo_keys)[3].tiff_tag_location = 0;
         (*geo_keys)[3].count = 1;
-        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source); 
+        (*geo_keys)[3].value_offset = get_ProjLinearUnitsGeoKey(source);
 
-        // here come the 6 double parameters
-/*
-        (*geo_keys)[4].key_id = 3078; // ProjStdParallel1GeoKey
+        // here come the 7 double parameters
+
+        (*geo_keys)[4].key_id = 3088; // ProjCenterLongGeoKey
         (*geo_keys)[4].tiff_tag_location = 34736;
         (*geo_keys)[4].count = 1;
         (*geo_keys)[4].value_offset = 0;
-        (*geo_double_params)[0] = hom->hom_first_std_parallel_degree;
+        (*geo_double_params)[0] = hom->hom_longitude_of_center_degree;
 
-        (*geo_keys)[5].key_id = 3079; // ProjStdParallel2GeoKey
+        (*geo_keys)[5].key_id = 3089; // ProjCenterLatGeoKey
         (*geo_keys)[5].tiff_tag_location = 34736;
         (*geo_keys)[5].count = 1;
         (*geo_keys)[5].value_offset = 1;
-        (*geo_double_params)[1] = hom->hom_second_std_parallel_degree;
+        (*geo_double_params)[1] = hom->hom_latitude_of_center_degree;
 
-        (*geo_keys)[6].key_id = 3088; // ProjCenterLongGeoKey
+        (*geo_keys)[6].key_id = 3094; // ProjAzimuthAngleGeoKey
         (*geo_keys)[6].tiff_tag_location = 34736;
         (*geo_keys)[6].count = 1;
         (*geo_keys)[6].value_offset = 2;
-        (*geo_double_params)[2] = hom->hom_long_meridian_degree;
+        (*geo_double_params)[2] = hom->hom_azimuth_degree;
 
-        (*geo_keys)[7].key_id = 3081; // ProjNatOriginLatGeoKey
+        (*geo_keys)[7].key_id = 3096; // ProjRectifiedGridAngleGeoKey
         (*geo_keys)[7].tiff_tag_location = 34736;
         (*geo_keys)[7].count = 1;
         (*geo_keys)[7].value_offset = 3;
-        (*geo_double_params)[3] = hom->hom_lat_origin_degree;
+        (*geo_double_params)[3] = hom->hom_rectified_grid_angle_degree;
 
-        (*geo_keys)[8].key_id = 3082; // ProjFalseEastingGeoKey
+        (*geo_keys)[8].key_id = 3093; // ProjScaleAtCenterGeoKey
         (*geo_keys)[8].tiff_tag_location = 34736;
         (*geo_keys)[8].count = 1;
         (*geo_keys)[8].value_offset = 4;
-        if (source)
-          (*geo_double_params)[4] = hom->hom_false_easting_meter / coordinates2meter;
-        else
-          (*geo_double_params)[4] = hom->hom_false_easting_meter * meter2coordinates;
+        (*geo_double_params)[4] = hom->hom_scale_factor;
 
-        (*geo_keys)[9].key_id = 3083; // ProjFalseNorthingGeoKey
+        (*geo_keys)[9].key_id = 3082; // ProjFalseEastingGeoKey
         (*geo_keys)[9].tiff_tag_location = 34736;
         (*geo_keys)[9].count = 1;
         (*geo_keys)[9].value_offset = 5;
         if (source)
-          (*geo_double_params)[5] = hom->hom_false_northing_meter / coordinates2meter;
+          (*geo_double_params)[5] = hom->hom_false_easting_meter / coordinates2meter;
         else
-          (*geo_double_params)[5] = hom->hom_false_northing_meter * meter2coordinates;
+          (*geo_double_params)[5] = hom->hom_false_easting_meter * meter2coordinates;
 
-*/
-        // GCS used with custom HOM projection
-        (*geo_keys)[10].key_id = 2048; // GeographicTypeGeoKey
-        (*geo_keys)[10].tiff_tag_location = 0;
+        (*geo_keys)[10].key_id = 3083; // ProjFalseNorthingGeoKey
+        (*geo_keys)[10].tiff_tag_location = 34736;
         (*geo_keys)[10].count = 1;
-        (*geo_keys)[10].value_offset = get_GeographicTypeGeoKey();
+        (*geo_keys)[10].value_offset = 6;
+        if (source)
+          (*geo_double_params)[6] = hom->hom_false_northing_meter / coordinates2meter;
+        else
+          (*geo_double_params)[6] = hom->hom_false_northing_meter * meter2coordinates;
 
-        // vertical units
-        (*geo_keys)[11].key_id = 4099; // VerticalUnitsGeoKey
+        // GCS used with custom HOM projection
+        (*geo_keys)[11].key_id = 2048; // GeographicTypeGeoKey
         (*geo_keys)[11].tiff_tag_location = 0;
         (*geo_keys)[11].count = 1;
-        (*geo_keys)[11].value_offset = get_VerticalUnitsGeoKey(source);
+        (*geo_keys)[11].value_offset = get_GeographicTypeGeoKey();
+
+        // vertical units
+        (*geo_keys)[12].key_id = 4099; // VerticalUnitsGeoKey
+        (*geo_keys)[12].tiff_tag_location = 0;
+        (*geo_keys)[12].count = 1;
+        (*geo_keys)[12].value_offset = get_VerticalUnitsGeoKey(source);
 
         if (vertical_geokey)
         {
           // vertical datum
-          (*geo_keys)[12].key_id = 4096; // VerticalCSTypeGeoKey
-          (*geo_keys)[12].tiff_tag_location = 0;
-          (*geo_keys)[12].count = 1;
-          (*geo_keys)[12].value_offset = vertical_geokey;
+          (*geo_keys)[13].key_id = 4096; // VerticalCSTypeGeoKey
+          (*geo_keys)[13].tiff_tag_location = 0;
+          (*geo_keys)[13].count = 1;
+          (*geo_keys)[13].value_offset = vertical_geokey;
         }
         return true;
       }
       else
       {
-        fprintf(stderr, "get_geo_keys_from_projection for generic UTM not implemented\n");
+        fprintf(stderr, "get_geo_keys_from_projection for generic projection not implemented\n");
       }
     }
     else if (projection->type == GEO_PROJECTION_LAT_LONG || projection->type == GEO_PROJECTION_LONG_LAT)
@@ -1711,29 +1866,11 @@ bool GeoProjectionConverter::get_geo_keys_from_projection(int& num_geo_keys, Geo
   return false;
 }
 
-bool GeoProjectionConverter::set_projection_from_ogc_wkt(int len, char* ogc_wkt)
-{
-  bool user_defined_ellipsoid = false;
-  int user_defined_projection = 0;
-  int offsetProjStdParallel1GeoKey = -1;
-  int offsetProjStdParallel2GeoKey = -1;
-  int offsetProjNatOriginLatGeoKey = -1;
-  int offsetProjFalseEastingGeoKey = -1;
-  int offsetProjFalseNorthingGeoKey = -1;
-  int offsetProjCenterLongGeoKey = -1;
-  int offsetProjScaleAtNatOriginGeoKey = -1;
-  bool has_projection = false;
-  int ellipsoid = -1;
-  int datum = -1;
-
-  return false;
-}
-
-static FILE* open_geo_file(const char* program_name, bool pcs=true)
+static FILE* open_geo_file(const char* program_name, bool pcs=true, bool vertical=false)
 {
   FILE* file = 0;
 
-  // create path to 'pcs.csv' file
+  // create path to 'pcs.csv', 'gcs.csv', or 'vertcs.csv' file
 
   #define MAX_GEO_PATH_LENGTH 4096
   int path_len = 0;
@@ -1743,7 +1880,7 @@ static FILE* open_geo_file(const char* program_name, bool pcs=true)
   if (program_name)
   {
     GetModuleFileName(GetModuleHandle(program_name),(LPTSTR)path, MAX_GEO_PATH_LENGTH);
-    path_len = strlen(path);
+    path_len = (int)strlen(path);
   }
   else
   {
@@ -1765,9 +1902,21 @@ static FILE* open_geo_file(const char* program_name, bool pcs=true)
   path[path_len] = 'e'; path_len++;
   path[path_len] = 'o'; path_len++;
   path[path_len] = '/'; path_len++;
-  path[path_len] = (pcs ? 'p' : 'g'); path_len++;
-  path[path_len] = 'c'; path_len++;
-  path[path_len] = 's'; path_len++;
+  if (vertical)
+  {
+    path[path_len] = 'v'; path_len++;
+    path[path_len] = 'e'; path_len++;
+    path[path_len] = 'r'; path_len++;
+    path[path_len] = 't'; path_len++;
+    path[path_len] = 'c'; path_len++;
+    path[path_len] = 's'; path_len++;
+  }
+  else
+  {
+    path[path_len] = (pcs ? 'p' : 'g'); path_len++;
+    path[path_len] = 'c'; path_len++;
+    path[path_len] = 's'; path_len++;
+  }
   path[path_len] = '.'; path_len++;
   path[path_len] = 'c'; path_len++;
   path[path_len] = 's'; path_len++;
@@ -1777,6 +1926,240 @@ static FILE* open_geo_file(const char* program_name, bool pcs=true)
   file = fopen(path, "r");
 
   return file;
+}
+
+bool get_unit_from_ogc_wkt(const char* ogc_wkt, double* value)
+{
+  const char* unit = strstr(ogc_wkt, "UNIT[");
+  if (unit)
+  {
+    int len = (int)strlen(ogc_wkt);
+    int curr = (int)((unit - ogc_wkt) + 5);
+    while (curr < len)
+    {
+      if (ogc_wkt[curr] == '[')
+      {
+        return false;
+      }
+      else if (ogc_wkt[curr] == ']')
+      {
+        return false;
+      }
+      else if (ogc_wkt[curr] == ',')
+      {
+        curr++;
+        if (sscanf(&ogc_wkt[curr], "%lf", value) == 1)
+        {
+//          fprintf(stderr, "unit %f\n", *value);
+          return true;
+        }
+      }
+      curr++;
+    }
+  }
+  return false;
+}
+
+bool get_parameter_from_ogc_wkt(const char* ogc_wkt, const char* name, double* value)
+{
+  const char* para = strstr(ogc_wkt, name);
+  if (para)
+  {
+    int len = (int)strlen(ogc_wkt);
+    int curr = (int)((para - ogc_wkt) + strlen(name));
+    while (curr < len)
+    {
+      if (ogc_wkt[curr] == '[')
+      {
+        return false;
+      }
+      else if (ogc_wkt[curr] == ']')
+      {
+        return false;
+      }
+      else if (ogc_wkt[curr] == ',')
+      {
+        curr++;
+        if (sscanf(&ogc_wkt[curr], "%lf", value) == 1)
+        {
+//          fprintf(stderr, "%s %f\n", name, *value);
+          return true;
+        }
+      }
+      curr++;
+    }
+  }
+  return false;
+}
+
+bool GeoProjectionConverter::set_projection_from_ogc_wkt(const char* ogc_wkt, char* description)
+{
+/*
+  bool user_defined_ellipsoid = false;
+  int user_defined_projection = 0;
+  int offsetProjStdParallel1GeoKey = -1;
+  int offsetProjStdParallel2GeoKey = -1;
+  int offsetProjNatOriginLatGeoKey = -1;
+  int offsetProjFalseEastingGeoKey = -1;
+  int offsetProjFalseNorthingGeoKey = -1;
+  int offsetProjCenterLongGeoKey = -1;
+  int offsetProjScaleAtNatOriginGeoKey = -1;
+  bool has_projection = false;
+  int ellipsoid = -1;
+  int datum = -1;
+*/
+
+  // this very first version only checks for the EPSG code of projection
+
+  // check if we have a projection (e.g. string contains a PROJCS)
+
+  int len = (int)strlen(ogc_wkt);
+  const char* projcs = strstr(ogc_wkt, "PROJCS[");
+
+  if (projcs)
+  {
+    // if we can find an AUTHORITY containing the EPSG code we are done
+    int open_bracket = 1;
+    int curr = (int)((projcs - ogc_wkt) + 7);
+    while ((curr < len) && open_bracket)
+    {
+      if (ogc_wkt[curr] == '[')
+      {
+        open_bracket++;
+      }
+      else if (ogc_wkt[curr] == ']')
+      {
+        open_bracket--;
+      }
+      else if (open_bracket == 1)
+      {
+        if (ogc_wkt[curr] == 'A')
+        {
+          if (strncmp(&ogc_wkt[curr], "AUTHORITY", 9) == 0)
+          {
+            curr += 9;
+            const char* epsg = strstr(&ogc_wkt[curr], "\"EPSG\"");
+            if (epsg)
+            {
+              curr = (int)((epsg - ogc_wkt) + 6);
+              while ((curr < len) && ogc_wkt[curr] != ',')
+              {
+                curr++;
+              }
+              curr++;
+              while ((curr < len) && ogc_wkt[curr] != '\"')
+              {
+                curr++;
+              }
+              curr++;
+              int code = -1;
+              if (sscanf(&ogc_wkt[curr], "%d", &code) == 1)
+              {
+                return set_epsg_code(code, description);
+              }
+            }
+          }
+        }
+      }
+      curr++;
+    }
+
+    // otherwise try to find the PROJECTION and all its parameters
+
+    const char* proj = strstr(projcs, "PROJECTION[");
+
+    if (proj)
+    {
+      int open_bracket = 1;
+      int curr = (int)((proj - ogc_wkt) + 11);
+
+      while (curr < len)
+      {
+        if (ogc_wkt[curr] == '[')
+        {
+          open_bracket++;
+        }
+        else if (ogc_wkt[curr] == ']')
+        {
+          open_bracket--;
+        }
+        else if (open_bracket == 1)
+        {
+          if (ogc_wkt[curr] == '\"')
+          {
+            curr++;
+            if (strncmp(&ogc_wkt[curr], "Lambert_Conformal_Conic", 23) == 0)
+            {
+              double false_easting;
+              double false_northing;
+              double unit = 1.0;
+              double latitude_of_origin;
+              double central_meridian;
+              double standard_parallel_1;
+              double standard_parallel_2;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "false_easting", &false_easting) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "False_Easting", &false_easting)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "false_northing", &false_northing) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "False_Northing", &false_northing)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "latitude_of_origin", &latitude_of_origin) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Latitude_Of_Origin", &latitude_of_origin)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "central_meridian", &central_meridian) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Central_Meridian", &central_meridian)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "standard_parallel_1", &standard_parallel_1) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Standard_Parallel_1", &standard_parallel_1)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "standard_parallel_2", &standard_parallel_2) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Standard_Parallel_2", &standard_parallel_2)) return false;
+              get_unit_from_ogc_wkt(&ogc_wkt[curr], &unit);
+              set_lambert_conformal_conic_projection(unit*false_easting, unit*false_northing, latitude_of_origin, central_meridian, standard_parallel_1, standard_parallel_2);
+              return true;
+            }
+            else if (strncmp(&ogc_wkt[curr], "Transverse_Mercator", 19) == 0)
+            {
+              double false_easting;
+              double false_northing;
+              double unit = 1.0;
+              double latitude_of_origin;
+              double central_meridian;
+              double scale_factor;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "false_easting", &false_easting) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "False_Easting", &false_easting)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "false_northing", &false_northing) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "False_Northing", &false_northing)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "latitude_of_origin", &latitude_of_origin) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Latitude_Of_Origin", &latitude_of_origin)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "central_meridian", &central_meridian) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Central_Meridian", &central_meridian)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "scale_factor", &scale_factor) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Scale_Factor", &scale_factor)) return false;
+              get_unit_from_ogc_wkt(&ogc_wkt[curr], &unit);
+              set_transverse_mercator_projection(unit*false_easting, unit*false_northing, latitude_of_origin, central_meridian, scale_factor);
+              return true;
+            }
+            else if (strncmp(&ogc_wkt[curr], "Albers_Conic_Equal_Area", 23) == 0)
+            {
+              double false_easting;
+              double false_northing;
+              double unit = 1.0;
+              double latitude_of_center;
+              double longitude_of_center;
+              double standard_parallel_1;
+              double standard_parallel_2;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "false_easting", &false_easting) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "False_Easting", &false_easting)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "false_northing", &false_northing) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "False_Northing", &false_northing)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "latitude_of_center", &latitude_of_center) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Latitude_Of_Center", &latitude_of_center)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "longitude_of_center", &longitude_of_center) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Longitude_Of_Center", &longitude_of_center)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "standard_parallel_1", &standard_parallel_1) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Standard_Parallel_1", &standard_parallel_1)) return false;
+              if (!get_parameter_from_ogc_wkt(&ogc_wkt[curr], "standard_parallel_2", &standard_parallel_2) && !get_parameter_from_ogc_wkt(&ogc_wkt[curr], "Standard_Parallel_2", &standard_parallel_2)) return false;
+              get_unit_from_ogc_wkt(&ogc_wkt[curr], &unit);
+              set_albers_equal_area_conic_projection(unit*false_easting, unit*false_northing, latitude_of_center, longitude_of_center, standard_parallel_1, standard_parallel_2);
+              return true;
+            }
+            else
+            {
+              return false;
+            }
+          }
+        }
+        curr++;
+      }
+    }
+  }
+  else
+  {
+      // check if the string contains a GEOCCS
+    const char* geoccs = strstr(ogc_wkt, "GEOCCS[");
+  }
+
+  return false;
 }
 
 static char* get_epsg_name_from_pcs_file(const char* program_name, short value)
@@ -1804,10 +2187,10 @@ static char* get_epsg_name_from_pcs_file(const char* program_name, short value)
         if (line[run] == '\"')
         {
           // remove opening parentheses
-          run++; 
+          run++;
           // this is where the name starts
           name = &line[run];
-          run++; 
+          run++;
           // skip until closing parentheses
           while (line[run] != '\"') run++;
           // this is where the name ends
@@ -1823,18 +2206,19 @@ static char* get_epsg_name_from_pcs_file(const char* program_name, short value)
           line[run] = '\0';
         }
         // copy the name
-        epsg_name = strdup(name);
+        epsg_name = LASCopyString(name);
         break;
       }
     }
   }
+  fclose(file);
   return epsg_name;
 }
 
 static int print_ogc_wkt_spheroid(char* string, short spheroid_code)
 {
   int n = 0;
-  
+
   if (spheroid_code == GEO_SPHEROID_WGS84)
   {
     n = sprintf(string, "SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],");
@@ -1873,7 +2257,7 @@ static int print_ogc_wkt_spheroid(char* string, short spheroid_code)
 static int print_ogc_wkt_datum(char* string, const char* datum_name, short datum_code, short spheroid_code)
 {
   int n = 0;
-  
+
   n += sprintf(&string[n], "DATUM[\"%s\",", datum_name);
   n += print_ogc_wkt_spheroid(&string[n], spheroid_code);
   n += sprintf(&string[n], "AUTHORITY[\"EPSG\",\"%d\"]],", datum_code);
@@ -1884,7 +2268,7 @@ static int print_ogc_wkt_datum(char* string, const char* datum_name, short datum
 static int print_ogc_wkt_geogcs(char* string, const char* gcs_name, short gcs_code, const char* datum_name, short datum_code, short spheroid_code)
 {
   int n = 0;
-  
+
   n += sprintf(&string[n], "GEOGCS[\"%s\",", gcs_name);
   n += print_ogc_wkt_datum(&string[n], datum_name, datum_code, spheroid_code);
   n += sprintf(&string[n], "PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.01745329251994328,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"%d\"]],", gcs_code);
@@ -1892,6 +2276,7 @@ static int print_ogc_wkt_geogcs(char* string, const char* gcs_name, short gcs_co
   return n;
 }
 
+/* non-zero *ogc_wkt returns char[] that becomes property of caller. dealloc with free() */
 bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wkt, bool source)
 {
   GeoProjectionParameters* projection = (source ? source_projection : target_projection);
@@ -1905,19 +2290,136 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
     {
       n += sprintf(&string[n], "GEOCCS[\"WGS 84\",DATUM[\"World Geodetic System 1984\",SPHEROID[\"WGS 84\",6378137.0,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0.0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"m\",1.0],AXIS[\"Geocentric X\",OTHER],AXIS[\"Geocentric Y\",EAST],AXIS[\"Geocentric Z\",NORTH],AUTHORITY[\"EPSG\",\"4978\"]]");
     }
-    else 
+    else
     {
       // if not geographic we have a projection
       if ((projection->type != GEO_PROJECTION_LAT_LONG) && (projection->type != GEO_PROJECTION_LONG_LAT))
       {
+        char* epsg_name = 0;
         if (strlen(projection->name) == 0)
         {
-          char* epsg_name = get_epsg_name_from_pcs_file(argv_zero, projection->geokey);
-          if (epsg_name)
+          epsg_name = get_epsg_name_from_pcs_file(argv_zero, projection->geokey);
+        }
+        // maybe output a compound CRS
+        if ((vertical_geokey == GEO_VERTICAL_NAVD88) || (vertical_geokey == GEO_VERTICAL_NGVD29) || (vertical_geokey == GEO_VERTICAL_CGVD2013) || (vertical_geokey == GEO_VERTICAL_EVRF2007) || (vertical_geokey == GEO_VERTICAL_CGVD28) || (vertical_geokey == GEO_VERTICAL_DVR90) || (vertical_geokey == GEO_VERTICAL_NN2000) || (vertical_geokey == GEO_VERTICAL_NN54) || (vertical_geokey == GEO_VERTICAL_DHHN92) || (vertical_geokey == GEO_VERTICAL_DHHN2016) || (vertical_geokey == GEO_VERTICAL_NZVD2016) )
+        {
+          n += sprintf(&string[n], "COMPD_CS[\"%s + ", (epsg_name ? epsg_name : projection->name));
+
+          if (vertical_geokey == GEO_VERTICAL_NAVD88)
           {
-            n += sprintf(&string[n], "PROJCS[\"%s\",", epsg_name);
-            free(epsg_name);
+            n += sprintf(&string[n], "NAVD88");
+            if (vertical_geoid)
+            {
+              if (vertical_geoid == GEO_VERTICAL_NAVD88_GEOID12B)
+              {
+                n += sprintf(&string[n], " height - Geoid12B");
+              }
+              else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID12A)
+              {
+                n += sprintf(&string[n], " height - Geoid12A");
+              }
+              else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID12)
+              {
+                n += sprintf(&string[n], " height - Geoid12");
+              }
+              else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID09)
+              {
+                n += sprintf(&string[n], " height - Geoid09");
+              }
+              else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID06)
+              {
+                n += sprintf(&string[n], " height - Geoid06");
+              }
+              else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID03)
+              {
+                n += sprintf(&string[n], " height - Geoid03");
+              }
+              else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID99)
+              {
+                n += sprintf(&string[n], " height - Geoid99");
+              }
+              else if (vertical_geoid == GEO_VERTICAL_NAVD88_GEOID96)
+              {
+                n += sprintf(&string[n], " height - Geoid96");
+              }
+            }
           }
+          else if (vertical_geokey == GEO_VERTICAL_NGVD29)
+          {
+            n += sprintf(&string[n], "NGVD29");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_CGVD2013)
+          {
+            n += sprintf(&string[n], "CGVD2013");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_EVRF2007)
+          {
+            n += sprintf(&string[n], "EVRF2007");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_CGVD28)
+          {
+            n += sprintf(&string[n], "CGVD28");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_DVR90)
+          {
+            n += sprintf(&string[n], "DVR90");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_NN2000)
+          {
+            n += sprintf(&string[n], "NN2000");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_NN54)
+          {
+            n += sprintf(&string[n], "NN54");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_DHHN92)
+          {
+            n += sprintf(&string[n], "DHHN92");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_DHHN2016)
+          {
+            n += sprintf(&string[n], "DHHN2016");
+          }
+          else if (vertical_geokey == GEO_VERTICAL_NZVD2016)
+          {
+            n += sprintf(&string[n], "NZVD2016");
+          }
+
+          if (source)
+          {
+            if (elevation2meter == 1.0)
+            {
+              n += sprintf(&string[n], "\",");
+            }
+            else if (elevation2meter == 0.3048)
+            {
+              n += sprintf(&string[n], " (ft)\",");
+            }
+            else
+            {
+              n += sprintf(&string[n], " (ftUS)\",");
+            }
+          }
+          else
+          {
+            if (meter2elevation == 1.0)
+            {
+              n += sprintf(&string[n], "\",");
+            }
+            else if (meter2elevation == 0.3048)
+            {
+              n += sprintf(&string[n], " (ft)\",");
+            }
+            else
+            {
+              n += sprintf(&string[n], " (ftUS)\",");
+            }
+          }
+        }
+        if (epsg_name)
+        {
+          n += sprintf(&string[n], "PROJCS[\"%s\",", epsg_name);
+          free(epsg_name);
         }
         else
         {
@@ -1927,7 +2429,7 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
       // which datum
       if (gcs_code == GEO_GCS_NAD83_2011)
       {
-        n += sprintf(&string[n], "GEOGCS[\"NAD83(2011)\",DATUM[\"NAD_1983_2011\",SPHEROID[\"GRS 1980\",6378137,298.257222101,AUTHORITY[\"EPSG\",\"7019\"]]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.01745329251994328,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"6318\"]],");
+        n += sprintf(&string[n], "GEOGCS[\"NAD83(2011)\",DATUM[\"NAD_1983_2011\",SPHEROID[\"GRS 1980\",6378137,298.257222101,AUTHORITY[\"EPSG\",\"7019\"]],AUTHORITY[\"EPSG\",\"1116\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.01745329251994328,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\",\"6318\"]],");
       }
       else
       {
@@ -2018,9 +2520,11 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
             n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", os->os_false_easting_meter*meter2coordinates, os->os_false_northing_meter*meter2coordinates);
           }
         }
-        else 
+        else
         {
           free(string);
+          len = 0;
+          *ogc_wkt = 0;
           return false;
         }
         // units
@@ -2070,8 +2574,439 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
           n += sprintf(&string[n], "]");
         }
       }
+      if ((vertical_geokey == GEO_VERTICAL_NAVD88) || (vertical_geokey == GEO_VERTICAL_NGVD29) || (vertical_geokey == GEO_VERTICAL_CGVD2013) || (vertical_geokey == GEO_VERTICAL_EVRF2007) || (vertical_geokey == GEO_VERTICAL_CGVD28) || (vertical_geokey == GEO_VERTICAL_DVR90) || (vertical_geokey == GEO_VERTICAL_NN2000) || (vertical_geokey == GEO_VERTICAL_NN54) || (vertical_geokey == GEO_VERTICAL_DHHN92) || (vertical_geokey == GEO_VERTICAL_DHHN2016) || (vertical_geokey == GEO_VERTICAL_NZVD2016))
+      {
+        // comma for compound CRS
+        n += sprintf(&string[n], ",");
+        // add VERT_CS info
+        if (vertical_geokey == GEO_VERTICAL_NAVD88)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"NAVD88");
+          if (vertical_geoid)
+          {
+            if (vertical_geoid == GEO_VERTICAL_NAVD88_GEOID12B)
+            {
+              n += sprintf(&string[n], " height - Geoid12B");
+            }
+            else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID12A)
+            {
+              n += sprintf(&string[n], " height - Geoid12A");
+            }
+            else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID12)
+            {
+              n += sprintf(&string[n], " height - Geoid12");
+            }
+            else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID09)
+            {
+              n += sprintf(&string[n], " height - Geoid09");
+            }
+            else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID06)
+            {
+              n += sprintf(&string[n], " height - Geoid06");
+            }
+            else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID03)
+            {
+              n += sprintf(&string[n], " height - Geoid03");
+            }
+            else if (vertical_geoid ==  GEO_VERTICAL_NAVD88_GEOID99)
+            {
+              n += sprintf(&string[n], " height - Geoid99");
+            }
+            else if (vertical_geoid == GEO_VERTICAL_NAVD88_GEOID96)
+            {
+              n += sprintf(&string[n], " height - Geoid96");
+            }
+          }
+          n += sprintf(&string[n], "\",VERT_DATUM[\"North American Vertical Datum 1988\",2005,AUTHORITY[\"EPSG\",\"5103\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NGVD29)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"NGVD29\",VERT_DATUM[\"National Geodetic Vertical Datum 1929\",2005,AUTHORITY[\"EPSG\",\"5102\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_CGVD2013)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"CGVD2013\",VERT_DATUM[\"Canadian Geodetic Vertical Datum of 2013\",2005,AUTHORITY[\"EPSG\",\"1127\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_EVRF2007)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"EVRF2007\",VERT_DATUM[\"European Vertical Reference Frame 2007\",2005,AUTHORITY[\"EPSG\",\"5215\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_CGVD28)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"CGVD28\",VERT_DATUM[\"Canadian Geodetic Vertical Datum of 1928\",2005,AUTHORITY[\"EPSG\",\"5114\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_DVR90)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"DVR90\",VERT_DATUM[\"Dansk Vertikal Reference 1990\",2005,AUTHORITY[\"EPSG\",\"5206\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NN2000)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"NN2000\",VERT_DATUM[\"Norway Normal Null 2000\",2005,AUTHORITY[\"EPSG\",\"1096\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NN54)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"NN54\",VERT_DATUM[\"Norway Normal Null 1954\",2005,AUTHORITY[\"EPSG\",\"5174\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_DHHN92)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"DHHN92\",VERT_DATUM[\"Deutsches Haupthoehennetz 1992\",2005,AUTHORITY[\"EPSG\",\"5783\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_DHHN2016)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"DHHN2016\",VERT_DATUM[\"Deutsches Haupthoehennetz 2016\",2005,AUTHORITY[\"EPSG\",\"7837\"]],");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NZVD2016)
+        {
+          n += sprintf(&string[n], "VERT_CS[\"NZVD2016\",VERT_DATUM[\"New Zealand Vertical Datum 2016\",2005,AUTHORITY[\"EPSG\",\"7839\"]],");
+        }
+        if (source)
+        {
+          if (elevation2meter == 1.0)
+          {
+            n += sprintf(&string[n], "UNIT[\"metre\",1.0,AUTHORITY[\"EPSG\",\"9001\"]],");
+          }
+          else if (elevation2meter == 0.3048)
+          {
+            n += sprintf(&string[n], "UNIT[\"foot\",0.3048,AUTHORITY[\"EPSG\",\"9002\"]],");
+          }
+          else
+          {
+            n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192,AUTHORITY[\"EPSG\",\"9003\"]],");
+          }
+        }
+        else
+        {
+          if (meter2elevation == 1.0)
+          {
+            n += sprintf(&string[n], "UNIT[\"metre\",1.0,AUTHORITY[\"EPSG\",\"9001\"]],");
+          }
+          else if (meter2elevation == 0.3048)
+          {
+            n += sprintf(&string[n], "UNIT[\"foot\",0.3048,AUTHORITY[\"EPSG\",\"9002\"]],");
+          }
+          else
+          {
+            n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192,AUTHORITY[\"EPSG\",\"9003\"]],");
+          }
+        }
+        if (vertical_geokey == GEO_VERTICAL_NAVD88)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"%d\"]]", ((source && (elevation2meter == 1.0)) || (!source && (meter2elevation == 1.0)) ? 5703 : 6360));
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NGVD29)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5702\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_CGVD2013)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"6647\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_EVRF2007)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5621\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_CGVD28)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5713\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_DVR90)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5799\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NN2000)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5941\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NN54)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5776\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_DHHN92)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5783\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_DHHN2016)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"7837\"]]");
+        }
+        else if (vertical_geokey == GEO_VERTICAL_NZVD2016)
+        {
+          n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"7839\"]]");
+        }
+        // close bracket for compound CRS
+        n += sprintf(&string[n], "]");
+      }
     }
-    if ((vertical_geokey == GEO_VERTICAL_NAVD88) || (vertical_geokey == GEO_VERTICAL_NGVD29) || (vertical_geokey == GEO_VERTICAL_CGVD2013) || (vertical_geokey == GEO_VERTICAL_CGVD28) || (vertical_geokey == GEO_VERTICAL_DVR90))
+    len = n+1;
+    *ogc_wkt = string;
+    return true;
+  }
+  len = 0;
+  *ogc_wkt = 0;
+  return false;
+}
+
+static int print_prj_spheroid(char* string, short spheroid_code)
+{
+  int n = 0;
+
+  if (spheroid_code == GEO_SPHEROID_WGS84)
+  {
+    n = sprintf(string, "SPHEROID[\"WGS 84\",6378137,298.257223563]");
+  }
+  else if (spheroid_code == GEO_SPHEROID_GRS80)
+  {
+    n = sprintf(string, "SPHEROID[\"GRS 1980\",6378137,298.257222101]");
+  }
+  else if (spheroid_code == GEO_SPHEROID_WGS72)
+  {
+    n = sprintf(string, "SPHEROID[\"WGS 72\",6378135,298.26]");
+  }
+  else if (spheroid_code == GEO_SPHEROID_GRS67)
+  {
+    n = sprintf(string, "SPHEROID[\"GRS 1967\",6378160,298.247167427]");
+  }
+  else if (spheroid_code == GEO_SPHEROID_CLARKE1866)
+  {
+    n = sprintf(string, "SPHEROID[\"Clarke 1866\",6378206.4,294.9786982139006]");
+  }
+  else if (spheroid_code == GEO_SPHEROID_INTERNATIONAL)
+  {
+    n = sprintf(string, "SPHEROID[\"International 1924\",6378388,297]");
+  }
+  else if (spheroid_code == GEO_SPHEROID_BESSEL1841)
+  {
+    n = sprintf(string, "SPHEROID[\"Bessel 1841\",6377397.155,299.1528128]");
+  }
+  else if (spheroid_code == GEO_SPHEROID_AIRY)
+  {
+    n = sprintf(string, "SPHEROID[\"Airy 1830\",6377563.396,299.3249646]");
+  }
+  return n;
+}
+
+static int print_prj_datum(char* string, const char* datum_name, short datum_code, short spheroid_code)
+{
+  int n = 0;
+
+  if (datum_code == (GEO_GCS_WGS84 + 2000))
+  {
+    n += sprintf(&string[n], "DATUM[\"D_WGS_1984\",");
+  }
+  else
+  {
+    n += sprintf(&string[n], "DATUM[\"D_%s\",", datum_name);
+  }
+  n += print_prj_spheroid(&string[n], spheroid_code);
+  n += sprintf(&string[n], "],");
+
+  return n;
+}
+
+static int print_prj_geogcs(char* string, const char* gcs_name, short gcs_code, const char* datum_name, short datum_code, short spheroid_code)
+{
+  int n = 0;
+
+  n += sprintf(&string[n], "GEOGCS[\"%s\",", gcs_name);
+  n += print_prj_datum(&string[n], datum_name, datum_code, spheroid_code);
+  n += sprintf(&string[n], "PRIMEM[\"Greenwich\",0],UNIT[\"Degree\",0.017453292519943295]],");
+
+  return n;
+}
+
+/* non-zero *prj returns char[] that becomes property of caller. dealloc with free() */
+bool GeoProjectionConverter::get_prj_from_projection(int& len, char** prj, bool source)
+{
+  GeoProjectionParameters* projection = (source ? source_projection : target_projection);
+  if (projection)
+  {
+    int n = 0;
+    char* string = (char*)malloc(4096);
+    memset(string, 0, 4096);
+    // maybe geocentric
+    if (projection->type == GEO_PROJECTION_ECEF)
+    {
+      n += sprintf(&string[n], "GEOCCS[\"WGS 84\",DATUM[\"World Geodetic System 1984\",SPHEROID[\"WGS 84\",6378137.0,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0.0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"m\",1.0],AXIS[\"Geocentric X\",OTHER],AXIS[\"Geocentric Y\",EAST],AXIS[\"Geocentric Z\",NORTH],AUTHORITY[\"EPSG\",\"4978\"]]");
+    }
+    else
+    {
+      // if not geographic we have a projection
+      if ((projection->type != GEO_PROJECTION_LAT_LONG) && (projection->type != GEO_PROJECTION_LONG_LAT))
+      {
+        if (strlen(projection->name) == 0)
+        {
+          char* epsg_name = get_epsg_name_from_pcs_file(argv_zero, projection->geokey);
+          if (epsg_name)
+          {
+            n += sprintf(&string[n], "PROJCS[\"%s\",", epsg_name);
+            free(epsg_name);
+          }
+        }
+        else
+        {
+          n += sprintf(&string[n], "PROJCS[\"%s\",", projection->name);
+        }
+      }
+      // which datum
+      if (gcs_code == GEO_GCS_WGS84)
+      {
+        n += sprintf(&string[n], "GEOGCS[\"GCS_WGS_1984\",DATUM[\"D_WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563]],PRIMEM[\"Greenwich\",0],UNIT[\"Degree\",0.017453292519943295]],");
+      }
+      else if ((gcs_code == GEO_GCS_NAD83) || (gcs_code == GEO_GCS_NAD83_HARN) || (gcs_code == GEO_GCS_NAD83_CSRS) || (gcs_code == GEO_GCS_NAD83_PA11) || (gcs_code == GEO_GCS_NAD83_2011))
+      {
+        if (gcs_code == GEO_GCS_NAD83)
+        {
+          n += sprintf(&string[n], "GEOGCS[\"GCS_North_American_1983\",DATUM[\"D_North_American_1983\",");
+        }
+        else if (gcs_code == GEO_GCS_NAD83_HARN)
+        {
+          n += sprintf(&string[n], "GEOGCS[\"NAD83(HARN)\",DATUM[\"D_North_American_1983_HARN\",");
+        }
+        else if (gcs_code == GEO_GCS_NAD83_CSRS)
+        {
+          n += sprintf(&string[n], "GEOGCS[\"NAD83(CSRS)\",DATUM[\"D_NAD83_Canadian_Spatial_Reference_System\",");
+        }
+        else if (gcs_code == GEO_GCS_NAD83_PA11)
+        {
+          n += sprintf(&string[n], "GEOGCS[\"NAD83(PA11)\",DATUM[\"D_North_American_1983_PA11\",");
+        }
+        else
+        {
+          n += sprintf(&string[n], "GEOGCS[\"NAD83(2011)\",DATUM[\"D_North_American_1983_2011\",");
+        }
+        n += sprintf(&string[n], "SPHEROID[\"GRS 1980\",6378137,298.257222101]],PRIMEM[\"Greenwich\",0],UNIT[\"Degree\",0.017453292519943295]],");
+      }
+      else
+      {
+        n += print_prj_geogcs(&string[n], gcs_name, gcs_code, datum_name, datum_code, spheroid_code);
+      }
+      // maybe geographic (long/lat)
+      if (projection->type == GEO_PROJECTION_LONG_LAT)
+      {
+        n--; // remove comma
+        n--; // remove bracket
+        n += sprintf(&string[n], ",AXIS[\"Longitude\",EAST],AXIS[\"Latitude\",NORTH]]");
+      }
+      else if (projection->type == GEO_PROJECTION_LAT_LONG) // or maybe geographic with reversed coordinates
+      {
+        n--; // remove comma
+        n--; // remove bracket
+        n += sprintf(&string[n], ",AXIS[\"Latitude\",NORTH],AXIS[\"Longitude\",EAST]]");
+      }
+      else // some real projection
+      {
+        if (projection->type == GEO_PROJECTION_UTM)
+        {
+          GeoProjectionParametersUTM* utm = (GeoProjectionParametersUTM*)projection;
+          n += sprintf(&string[n], "PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",0],PARAMETER[\"central_meridian\",%d],PARAMETER[\"scale_factor\",0.9996],PARAMETER[\"false_easting\",500000],PARAMETER[\"false_northing\",%d],", -183 + 6 * utm->utm_zone_number, (utm->utm_northern_hemisphere ? 0 : 10000000));
+        }
+        else if (projection->type == GEO_PROJECTION_LCC)
+        {
+          GeoProjectionParametersLCC* lcc = (GeoProjectionParametersLCC*)projection;
+          n += sprintf(&string[n], "PROJECTION[\"Lambert_Conformal_Conic_2SP\"],PARAMETER[\"standard_parallel_1\",%.15g],PARAMETER[\"standard_parallel_2\",%.15g],PARAMETER[\"latitude_of_origin\",%.15g],PARAMETER[\"central_meridian\",%.15g],", lcc->lcc_first_std_parallel_degree, lcc->lcc_second_std_parallel_degree, lcc->lcc_lat_origin_degree, lcc->lcc_long_meridian_degree);
+          if (source)
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", lcc->lcc_false_easting_meter/coordinates2meter, lcc->lcc_false_northing_meter/coordinates2meter);
+          }
+          else
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", lcc->lcc_false_easting_meter*meter2coordinates, lcc->lcc_false_northing_meter*meter2coordinates);
+          }
+        }
+        else if (projection->type == GEO_PROJECTION_TM)
+        {
+          GeoProjectionParametersTM* tm = (GeoProjectionParametersTM*)projection;
+          n += sprintf(&string[n], "PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_of_origin\",%.15g],PARAMETER[\"central_meridian\",%.15g],PARAMETER[\"scale_factor\",%.15g],", tm->tm_lat_origin_degree, tm->tm_long_meridian_degree, tm->tm_scale_factor);
+          if (source)
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", tm->tm_false_easting_meter/coordinates2meter, tm->tm_false_northing_meter/coordinates2meter);
+          }
+          else
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", tm->tm_false_easting_meter*meter2coordinates, tm->tm_false_northing_meter*meter2coordinates);
+          }
+        }
+        else if (projection->type == GEO_PROJECTION_AEAC)
+        {
+          GeoProjectionParametersAEAC* aeac = (GeoProjectionParametersAEAC*)projection;
+          n += sprintf(&string[n], "PROJECTION[\"Albers_Conic_Equal_Area\"],PARAMETER[\"standard_parallel_1\",%.15g],PARAMETER[\"standard_parallel_2\",%.15g],PARAMETER[\"latitude_of_center\",%.15g],PARAMETER[\"longitude_of_center\",%.15g],", aeac->aeac_first_std_parallel_degree, aeac->aeac_second_std_parallel_degree, aeac->aeac_latitude_of_center_degree, aeac->aeac_longitude_of_center_degree);
+          if (source)
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", aeac->aeac_false_easting_meter/coordinates2meter, aeac->aeac_false_northing_meter/coordinates2meter);
+          }
+          else
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", aeac->aeac_false_easting_meter*meter2coordinates, aeac->aeac_false_northing_meter*meter2coordinates);
+          }
+        }
+        else if (projection->type == GEO_PROJECTION_HOM)
+        {
+          GeoProjectionParametersHOM* hom = (GeoProjectionParametersHOM*)projection;
+          n += sprintf(&string[n], "PROJECTION[\"Hotine_Oblique_Mercator\"],PARAMETER[\"latitude_of_center\",%.15g],PARAMETER[\"longitude_of_center\",%.15g],PARAMETER[\"azimuth\",%.15g],PARAMETER[\"rectified_grid_angle\",%.15g],PARAMETER[\"scale_factor\",%.15g],", hom->hom_latitude_of_center_degree, hom->hom_longitude_of_center_degree, hom->hom_azimuth_degree, hom->hom_rectified_grid_angle_degree , hom->hom_scale_factor);
+          if (source)
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", hom->hom_false_easting_meter/coordinates2meter, hom->hom_false_northing_meter/coordinates2meter);
+          }
+          else
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", hom->hom_false_easting_meter*meter2coordinates, hom->hom_false_northing_meter*meter2coordinates);
+          }
+        }
+        else if (projection->type == GEO_PROJECTION_OS)
+        {
+          GeoProjectionParametersOS* os = (GeoProjectionParametersOS*)projection;
+          n += sprintf(&string[n], "PROJECTION[\"Oblique_Stereographic\"],PARAMETER[\"latitude_of_origin\",%.15g],PARAMETER[\"central_meridian\",%.15g],PARAMETER[\"scale_factor\",%.15g],", os->os_lat_origin_degree, os->os_long_meridian_degree, os->os_scale_factor);
+          if (source)
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", os->os_false_easting_meter/coordinates2meter, os->os_false_northing_meter/coordinates2meter);
+          }
+          else
+          {
+            n += sprintf(&string[n], "PARAMETER[\"false_easting\",%.15g],PARAMETER[\"false_northing\",%.15g],", os->os_false_easting_meter*meter2coordinates, os->os_false_northing_meter*meter2coordinates);
+          }
+        }
+        else
+        {
+          free(string);
+          len = 0;
+          *prj = 0;
+          return false;
+        }
+        // units
+        if (source)
+        {
+          if (coordinates2meter == 1.0)
+          {
+            n += sprintf(&string[n], "UNIT[\"Meter\",1]");
+          }
+          else if (coordinates2meter == 0.3048)
+          {
+            n += sprintf(&string[n], "UNIT[\"foot\",0.3048]");
+          }
+          else
+          {
+            n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192]");
+          }
+        }
+        else
+        {
+          if (meter2coordinates == 1.0)
+          {
+            n += sprintf(&string[n], "UNIT[\"Meter\",1]");
+          }
+          else if (meter2coordinates == 0.3048)
+          {
+            n += sprintf(&string[n], "UNIT[\"foot\",0.3048]");
+          }
+          else
+          {
+            n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192]");
+          }
+        }
+        n += sprintf(&string[n], "]");
+      }
+    }
+    if ((vertical_geokey == GEO_VERTICAL_NAVD88) || (vertical_geokey == GEO_VERTICAL_NGVD29) || (vertical_geokey == GEO_VERTICAL_CGVD2013) || (vertical_geokey == GEO_VERTICAL_EVRF2007) || (vertical_geokey == GEO_VERTICAL_CGVD28) || (vertical_geokey == GEO_VERTICAL_DVR90) || (vertical_geokey == GEO_VERTICAL_NN2000) || (vertical_geokey == GEO_VERTICAL_NN54) || (vertical_geokey == GEO_VERTICAL_DHHN92) || (vertical_geokey == GEO_VERTICAL_DHHN2016) || (vertical_geokey == GEO_VERTICAL_NZVD2016))
     {
       if (vertical_geokey == GEO_VERTICAL_NAVD88)
       {
@@ -2085,6 +3020,10 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
       {
         n += sprintf(&string[n], "VERT_CS[\"CGVD2013\",VERT_DATUM[\"Canadian Geodetic Vertical Datum of 2013\",2005,AUTHORITY[\"EPSG\",\"1127\"]],");
       }
+      else if (vertical_geokey == GEO_VERTICAL_EVRF2007)
+      {
+        n += sprintf(&string[n], "VERT_CS[\"EVRF2007\",VERT_DATUM[\"European Vertical Reference Frame 2007\",2005,AUTHORITY[\"EPSG\",\"5215\"]],");
+      }
       else if (vertical_geokey == GEO_VERTICAL_CGVD28)
       {
         n += sprintf(&string[n], "VERT_CS[\"CGVD28\",VERT_DATUM[\"Canadian Geodetic Vertical Datum of 1928\",2005,AUTHORITY[\"EPSG\",\"5114\"]],");
@@ -2093,34 +3032,54 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
       {
         n += sprintf(&string[n], "VERT_CS[\"DVR90\",VERT_DATUM[\"Dansk Vertikal Reference 1990\",2005,AUTHORITY[\"EPSG\",\"5206\"]],");
       }
+      else if (vertical_geokey == GEO_VERTICAL_NN2000)
+      {
+        n += sprintf(&string[n], "VERT_CS[\"NN2000\",VERT_DATUM[\"Norway Normal Null 2000\",2005,AUTHORITY[\"EPSG\",\"1096\"]],");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_NN54)
+      {
+        n += sprintf(&string[n], "VERT_CS[\"NN54\",VERT_DATUM[\"Norway Normal Null 1954\",2005,AUTHORITY[\"EPSG\",\"5174\"]],");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_DHHN92)
+      {
+        n += sprintf(&string[n], "VERT_CS[\"DHHN92\",VERT_DATUM[\"Deutsches Haupthoehennetz 1992\",2005,AUTHORITY[\"EPSG\",\"5783\"]],");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_DHHN2016)
+      {
+        n += sprintf(&string[n], "VERT_CS[\"DHHN2016\",VERT_DATUM[\"Deutsches Haupthoehennetz 2016\",2005,AUTHORITY[\"EPSG\",\"7837\"]],");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_NZVD2016)
+      {
+        n += sprintf(&string[n], "VERT_CS[\"NZVD2016\",VERT_DATUM[\"New Zealand Vertical Datum 2016\",2005,AUTHORITY[\"EPSG\",\"7839\"]],");
+      }
       if (source)
       {
         if (elevation2meter == 1.0)
         {
-          n += sprintf(&string[n], "UNIT[\"metre\",1.0,AUTHORITY[\"EPSG\",\"9001\"]]");
+          n += sprintf(&string[n], "UNIT[\"metre\",1.0],");
         }
         else if (elevation2meter == 0.3048)
         {
-          n += sprintf(&string[n], "UNIT[\"foot\",0.3048,AUTHORITY[\"EPSG\",\"9002\"]]");
+          n += sprintf(&string[n], "UNIT[\"foot\",0.3048],");
         }
         else
         {
-          n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192,AUTHORITY[\"EPSG\",\"9003\"]],");
+          n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192],");
         }
       }
       else
       {
         if (meter2elevation == 1.0)
         {
-          n += sprintf(&string[n], "UNIT[\"metre\",1.0,AUTHORITY[\"EPSG\",\"9001\"]]");
+          n += sprintf(&string[n], "UNIT[\"metre\",1.0],");
         }
         else if (meter2elevation == 0.3048)
         {
-          n += sprintf(&string[n], "UNIT[\"foot\",0.3048,AUTHORITY[\"EPSG\",\"9002\"]]");
+          n += sprintf(&string[n], "UNIT[\"foot\",0.3048],");
         }
         else
         {
-          n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192,AUTHORITY[\"EPSG\",\"9003\"]],");
+          n += sprintf(&string[n], "UNIT[\"US survey foot\",0.3048006096012192],");
         }
       }
       if (vertical_geokey == GEO_VERTICAL_NAVD88)
@@ -2135,6 +3094,10 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
       {
         n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"6647\"]]");
       }
+      else if (vertical_geokey == GEO_VERTICAL_EVRF2007)
+      {
+        n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5621\"]]");
+      }
       else if (vertical_geokey == GEO_VERTICAL_CGVD28)
       {
         n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5713\"]]");
@@ -2143,24 +3106,37 @@ bool GeoProjectionConverter::get_ogc_wkt_from_projection(int& len, char** ogc_wk
       {
         n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5799\"]]");
       }
+      else if (vertical_geokey == GEO_VERTICAL_NN2000)
+      {
+        n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5941\"]]");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_NN54)
+      {
+        n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5776\"]]");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_DHHN92)
+      {
+        n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"5783\"]]");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_DHHN2016)
+      {
+        n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"7837\"]]");
+      }
+      else if (vertical_geokey == GEO_VERTICAL_NZVD2016)
+      {
+        n += sprintf(&string[n], "AXIS[\"Gravity-related height\",UP],AUTHORITY[\"EPSG\",\"7837\"]]");
+      }
     }
     len = n+1;
-    *ogc_wkt = string;
+    *prj = string;
     return true;
   }
+  len = 0;
+  *prj = 0;
   return false;
 }
 
-/*
-VERT_CS["Canadian Geodetic Vertical Datum of 1928",VERT_DATUM["Canadian Geodetic Vertical Datum of 1928",2005,AUTHORITY["EPSG","5114"]],UNIT["m",1.0],AXIS["Gravity-related height",UP],AUTHORITY["EPSG","5713"]]
-VERT_CS["North American Vertical Datum of 1988",VERT_DATUM["North American Vertical Datum 1988",2005,AUTHORITY["EPSG","5103"]],UNIT["m",1.0],AXIS["Gravity-related height",UP],AUTHORITY["EPSG","5703"]]
-VERT_CS["North American Vertical Datum of 1988",VERT_DATUM["North American Vertical Datum 1988",2005,AUTHORITY["EPSG","5103"]],UNIT["foot_survey_us",0.3048006096012192],AXIS["Gravity-related height",UP],AUTHORITY["EPSG","5703"]]
-
-  
-VERTCRS["CGVD28 height",VDATUM["Canadian Geodetic Vertical Datum of 1928"],CS[vertical,1],AXIS["gravity-related height (H)",up],LENGTHUNIT["metre",1.0],ID["EPSG",5713]]
-VERTCRS["CGVD2013 height",VDATUM["Canadian Geodetic Vertical Datum of 2013"],CS[vertical,1],AXIS["gravity-related height (H)",up],LENGTHUNIT["metre",1.0], ID["EPSG",6647]] 
-*/
-
+/* non-zero *proj4 returns char[] that becomes property of caller. dealloc with free() */
 bool GeoProjectionConverter::get_proj4_string_from_projection(int& len, char** proj4, bool source)
 {
   GeoProjectionParameters* projection = (source ? source_projection : target_projection);
@@ -2214,13 +3190,15 @@ bool GeoProjectionConverter::get_proj4_string_from_projection(int& len, char** p
     else
     {
       free(string);
+      len = 0;
+      *proj4 = 0;
       return false;
     }
     if (gcs_code == GEO_GCS_WGS84)
     {
       n += sprintf(&string[n], "+datum=WGS84 ");
     }
-    else if ((gcs_code == GEO_GCS_NAD83) || (gcs_code == GEO_GCS_NAD83_HARN) || (gcs_code == GEO_GCS_NAD83_CSRS) || (gcs_code == GEO_GCS_NAD83_2011) || (gcs_code == GEO_GCS_NAD83_NSRS2007))
+    else if ((gcs_code == GEO_GCS_NAD83) || (gcs_code == GEO_GCS_NAD83_HARN) || (gcs_code == GEO_GCS_NAD83_CSRS)|| (gcs_code == GEO_GCS_NAD83_PA11) || (gcs_code == GEO_GCS_NAD83_2011) || (gcs_code == GEO_GCS_NAD83_NSRS2007))
     {
       n += sprintf(&string[n], "+datum=NAD83 ");
     }
@@ -2252,9 +3230,11 @@ bool GeoProjectionConverter::get_proj4_string_from_projection(int& len, char** p
     {
       n += sprintf(&string[n], "+datum=bessel ");
     }
-    else 
+    else
     {
       free(string);
+      len = 0;
+      *proj4 = 0;
       return false;
     }
     if (has_coordinate_units(source))
@@ -2287,6 +3267,25 @@ bool GeoProjectionConverter::get_proj4_string_from_projection(int& len, char** p
     *proj4 = string;
     return true;
   }
+  len = 0;
+  *proj4 = 0;
+  return false;
+}
+
+bool GeoProjectionConverter::set_GTModelTypeGeoKey(short value, char* description)
+{
+  if (value == 2) // ModelTypeGeographic
+  {
+    return set_longlat_projection(description);
+  }
+  else if (value == 3) // ModelTypeGeocentric
+  {
+    return set_ecef_projection(description);
+  }
+  else if (value == 0) // ModelTypeUndefined
+  {
+    return set_no_projection(description);
+  }
   return false;
 }
 
@@ -2302,8 +3301,18 @@ short GeoProjectionConverter::get_GTModelTypeGeoKey() const
       }
     }
   }
-  return 0;
-//  return 2; // assume ModelTypeGeographic
+  if (source_projection)
+  {
+    if ((source_projection->type == GEO_PROJECTION_LONG_LAT) || (source_projection->type == GEO_PROJECTION_LAT_LONG))
+    {
+      return 2; // ModelTypeGeographic
+    }
+    if ((source_projection->type == GEO_PROJECTION_LCC) || (source_projection->type == GEO_PROJECTION_TM) || (source_projection->type == GEO_PROJECTION_AEAC) || (source_projection->type == GEO_PROJECTION_HOM) || (source_projection->type == GEO_PROJECTION_OS))
+    {
+      return 1; // ModelTypeProjected
+    }
+  }
+  return 0; // ModelTypeUndefined
 }
 
 short GeoProjectionConverter::get_GTRasterTypeGeoKey() const
@@ -2334,6 +3343,11 @@ short GeoProjectionConverter::get_GeographicTypeGeoKey() const
       }
     }
   }
+  // if not in geo keys maybe GCS code was set
+  if (gcs_code != -1)
+  {
+    return gcs_code;
+  }
   switch (ellipsoid->id)
   {
   case GEO_ELLIPSOID_AIRY: // GCSE_Airy1830
@@ -2356,7 +3370,7 @@ short GeoProjectionConverter::get_GeographicTypeGeoKey() const
     return 4022;
   case GEO_ELLIPSOID_KRASSOWSKY: // GCSE_Krassowsky1940
     return 4024;
-  case 16: // GCSE_AiryModified1849 
+  case 16: // GCSE_AiryModified1849
     return 4002;
   case 17: // GCSE_Everest1830Modified
     return 4018;
@@ -2584,6 +3598,90 @@ short GeoProjectionConverter::get_ProjectedCSTypeGeoKey(bool source) const
       else
       {
         GeoProjectionParametersUTM* utm = (GeoProjectionParametersUTM*)projection;
+        if (gcs_code == GEO_GCS_NAD83)
+        {
+          if (utm->utm_northern_hemisphere)
+          {
+            if ((1 <= utm->utm_zone_number) && (utm->utm_zone_number <= 23))
+            {
+              return 26900 + utm->utm_zone_number;
+            }
+            else if ((59 <= utm->utm_zone_number) && (utm->utm_zone_number <= 60))
+            {
+              return 3313 + utm->utm_zone_number;
+            }
+          }
+        }
+        else if (gcs_code == GEO_GCS_NAD83_CSRS)
+        {
+          if (utm->utm_northern_hemisphere)
+          {
+            if ((7 <= utm->utm_zone_number) && (utm->utm_zone_number <= 22))
+            {
+              unsigned short epsg_codes_NAD83_CSRS[] = { 3154, 3155, 3156, 3157, 2955, 2956, 2957, 3158, 3159, 3160, 2958, 2959, 2960, 2961, 2962, 3761 };
+              return epsg_codes_NAD83_CSRS[utm->utm_zone_number - 7];
+            }
+          }
+        }
+        else if (gcs_code == GEO_GCS_NAD83_2011)
+        {
+          if (utm->utm_northern_hemisphere)
+          {
+            if ((1 <= utm->utm_zone_number) && (utm->utm_zone_number <= 19))
+            {
+              return 6329 + utm->utm_zone_number;
+            }
+            else if ((59 <= utm->utm_zone_number) && (utm->utm_zone_number <= 60))
+            {
+              return 6269 + utm->utm_zone_number;
+            }
+          }
+        }
+        else if (gcs_code == GEO_GCS_NAD83_NSRS2007)
+        {
+          if (utm->utm_northern_hemisphere)
+          {
+            if ((1 <= utm->utm_zone_number) && (utm->utm_zone_number <= 19))
+            {
+              return 3707 + utm->utm_zone_number;
+            }
+            else if ((59 <= utm->utm_zone_number) && (utm->utm_zone_number <= 60))
+            {
+              return 3647 + utm->utm_zone_number;
+            }
+          }
+        }
+        else if (gcs_code == GEO_GCS_NAD83_HARN)
+        {
+          if (utm->utm_northern_hemisphere)
+          {
+            if ((10 <= utm->utm_zone_number) && (utm->utm_zone_number <= 19))
+            {
+              return 3730 + utm->utm_zone_number;
+            }
+            else if ((4 <= utm->utm_zone_number) && (utm->utm_zone_number <= 5))
+            {
+              return 3746 + utm->utm_zone_number;
+            }
+          }
+          else
+          {
+            if (utm->utm_zone_number == 2)
+            {
+              return 2195;
+            }
+          }
+        }
+        else if (gcs_code == GEO_GCS_NAD83_CSRS)
+        {
+          if (utm->utm_northern_hemisphere)
+          {
+            if ((7 <= utm->utm_zone_number) && (utm->utm_zone_number <= 22))
+            {
+              return 6643 + utm->utm_zone_number;
+            }
+          }
+        }
         if (ellipsoid->id == GEO_ELLIPSOID_WGS84)
         {
           if (utm->utm_northern_hemisphere)
@@ -2610,11 +3708,11 @@ short GeoProjectionConverter::get_ProjectedCSTypeGeoKey(bool source) const
         {
           if (utm->utm_northern_hemisphere)
           {
-            if (3 <= utm->utm_zone_number && utm->utm_zone_number <= 23)
+            if ((3 <= utm->utm_zone_number) && (utm->utm_zone_number <= 23))
             {
               return utm->utm_zone_number + 26900;
             }
-            else if (28 <= utm->utm_zone_number && utm->utm_zone_number <= 38)
+            else if ((28 <= utm->utm_zone_number) && (utm->utm_zone_number <= 38))
             {
               return utm->utm_zone_number + 25800;
             }
@@ -2625,14 +3723,28 @@ short GeoProjectionConverter::get_ProjectedCSTypeGeoKey(bool source) const
           }
           else
           {
-            fprintf(stderr, "get_ProjectedCSTypeGeoKey: southern UTM zone %d for NAD83 does not exist\n", utm->utm_zone_number);
+            if (gcs_code == GEO_GCS_GDA94)
+            {
+              if ((48 <= utm->utm_zone_number) && (utm->utm_zone_number <= 58))
+              {
+                return utm->utm_zone_number + 28300;
+              }
+              else
+              {
+                fprintf(stderr, "get_ProjectedCSTypeGeoKey: southern MGA zone %d for GDA94 does not exist\n", utm->utm_zone_number);
+              }
+            }
+            else
+            {
+              fprintf(stderr, "get_ProjectedCSTypeGeoKey: southern UTM zone %d for NAD83 does not exist\n", utm->utm_zone_number);
+            }
           }
         }
         else if (ellipsoid->id == GEO_ELLIPSOID_CLARKE1866)
         {
           if (utm->utm_northern_hemisphere)
           {
-            if (3 <= utm->utm_zone_number && utm->utm_zone_number <= 22)
+            if ((3 <= utm->utm_zone_number) && (utm->utm_zone_number <= 22))
             {
               return utm->utm_zone_number + 26700;
             }
@@ -2650,7 +3762,7 @@ short GeoProjectionConverter::get_ProjectedCSTypeGeoKey(bool source) const
         {
           if (utm->utm_northern_hemisphere)
           {
-            if (18 <= utm->utm_zone_number && utm->utm_zone_number <= 22)
+            if ((18 <= utm->utm_zone_number) && (utm->utm_zone_number <= 22))
             {
               return utm->utm_zone_number + 29100;
             }
@@ -2675,7 +3787,7 @@ short GeoProjectionConverter::get_ProjectedCSTypeGeoKey(bool source) const
         {
           if (utm->utm_northern_hemisphere)
           {
-            if (28 <= utm->utm_zone_number && utm->utm_zone_number <= 38)
+            if ((28 <= utm->utm_zone_number) && (utm->utm_zone_number <= 38))
             {
               return utm->utm_zone_number + 23000;
             }
@@ -2693,7 +3805,7 @@ short GeoProjectionConverter::get_ProjectedCSTypeGeoKey(bool source) const
         {
           if (utm->utm_northern_hemisphere)
           {
-            if (46 <= utm->utm_zone_number && utm->utm_zone_number <= 53)
+            if ((46 <= utm->utm_zone_number) && (utm->utm_zone_number <= 53))
             {
               return utm->utm_zone_number + 23800;
             }
@@ -2704,7 +3816,7 @@ short GeoProjectionConverter::get_ProjectedCSTypeGeoKey(bool source) const
           }
           else
           {
-            if (46 <= utm->utm_zone_number && utm->utm_zone_number <= 54)
+            if ((46 <= utm->utm_zone_number) && (utm->utm_zone_number <= 54))
             {
               return utm->utm_zone_number + 23840;
             }
@@ -2904,18 +4016,18 @@ short GeoProjectionConverter::get_GeogEllipsoidGeoKey() const
   return 0;
 }
 
-bool GeoProjectionConverter::set_ProjLinearUnitsGeoKey(short value)
+bool GeoProjectionConverter::set_ProjLinearUnitsGeoKey(short value, bool source)
 {
   switch (value)
   {
   case 9001: // Linear_Meter
-    set_coordinates_in_meter();
+    set_coordinates_in_meter(source);
     break;
   case 9002: // Linear_Foot
-    set_coordinates_in_feet();
+    set_coordinates_in_feet(source);
     break;
   case 9003: // Linear_Foot_US_Survey
-    set_coordinates_in_survey_feet();
+    set_coordinates_in_survey_feet(source);
     break;
   default:
     fprintf(stderr, "set_ProjLinearUnitsGeoKey: look-up for %d not implemented\n", value);
@@ -3020,26 +4132,166 @@ short GeoProjectionConverter::get_VerticalUnitsGeoKey(bool source) const
   }
 }
 
-bool GeoProjectionConverter::set_VerticalCSTypeGeoKey(short value)
+bool GeoProjectionConverter::set_VerticalCSTypeGeoKey(short value, char* description)
 {
-  if ((5000 <= value) && (value <= 5099))      // [5000, 5099] = EPSG Ellipsoid Vertical CS Codes
+  if (value == GEO_VERTICAL_WGS84)
   {
-    vertical_geokey = value;
+    vertical_geokey = GEO_VERTICAL_WGS84;
+    if (description) sprintf(description, "WGS 84 Ellipsoid");
+    return true;
   }
-  else if ((5101 <= value) && (value <= 5199)) // [5100, 5199] = EPSG Orthometric Vertical CS Codes
+  else if (value == GEO_VERTICAL_NAVD88)
   {
-    vertical_geokey = value;
+    vertical_geokey = GEO_VERTICAL_NAVD88;
+    if (description) sprintf(description, "North American Vertical Datum 1988");
+    return true;
   }
-  else if ((5200 <= value) && (value <= 5999)) // [5200, 5999] = Reserved EPSG
+  else if (value == GEO_VERTICAL_DHHN2016)
   {
-    vertical_geokey = value;
+    vertical_geokey = GEO_VERTICAL_DHHN2016;
+    if (description) sprintf(description, "Deutsches Haupthoehennetz 2016");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_NZVD2016)
+  {
+    vertical_geokey = GEO_VERTICAL_NZVD2016;
+    if (description) sprintf(description, "New Zealand Vertical Datum 2016");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_DHHN92)
+  {
+    vertical_geokey = GEO_VERTICAL_DHHN92;
+    if (description) sprintf(description, "Deutsches Haupthoehennetz 1992");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_CGVD2013)
+  {
+    vertical_geokey = GEO_VERTICAL_CGVD2013;
+    if (description) sprintf(description, "Canadian Geodetic Vertical Datum of 2013");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_NN2000)
+  {
+    vertical_geokey = GEO_VERTICAL_NN2000;
+    if (description) sprintf(description, "Norway Normal Null 2000");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_NN54)
+  {
+    vertical_geokey = GEO_VERTICAL_NN54;
+    if (description) sprintf(description, "Norway Normal Null 1954");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_EVRF2007)
+  {
+    vertical_geokey = GEO_VERTICAL_EVRF2007;
+    if (description) sprintf(description, "European Vertical Reference Frame 2007");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_DVR90)
+  {
+    vertical_geokey = GEO_VERTICAL_DVR90;
+    if (description) sprintf(description, "Dansk Vertikal Reference 1990");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_NGVD29)
+  {
+    vertical_geokey = GEO_VERTICAL_NGVD29;
+    if (description) sprintf(description, "National Geodetic Vertical Datum 1929");
+    return true;
+  }
+  else if (value == GEO_VERTICAL_CGVD28)
+  {
+    vertical_geokey = GEO_VERTICAL_CGVD28;
+    if (description) sprintf(description, "Canadian Geodetic Vertical Datum of 1928");
+    return true;
+  }
+  else if ((5000 <= value) && (value <= 5099)) // [5000, 5099] = EPSG Ellipsoid Vertical CS Codes
+  {
+    vertical_geokey = value;    
+    if (description) sprintf(description, "Some Ellipsoid Vertical Datum");
+    return true;
   }
   else
   {
-    fprintf(stderr, "set_VerticalCSTypeGeoKey: look-up for %d not implemented\012", value);
-    return false;
+    // try to look it up in 'vertcs.csv' file
+    FILE* file = open_geo_file(argv_zero, true, true);
+    if (file == 0)
+    {
+      fprintf(stderr, "ERROR: cannot open 'vertcs.csv' file. maybe your LAStools distribution\n");
+      fprintf(stderr, "       has no .\\LAStools\\bin\\serf\\geo\\vertcs.csv file. download the\n");
+      fprintf(stderr, "       latest version at http://lastools.org/download/LAStools.zip\n");
+      return false;
+    }
+    int epsg_code = 0;
+    char line[2048];
+    while (fgets(line, 2048, file))
+    {
+      if (sscanf(line, "%d,", &epsg_code) == 1)
+      {
+        if (epsg_code == value)
+        {
+          // no need to read this file any further
+          fclose(file);
+          file = 0;
+          // parse the current line
+          char* name;
+          int dummy, units, run = 0;;
+          // skip until first comma
+          while (line[run] != ',') run++;
+          run++;
+          // maybe name is in parentheses
+          if (line[run] == '\"')
+          {
+            // remove opening parentheses
+            run++;
+            // this is where the name starts
+            name = &line[run];
+            run++;
+            // skip until closing parentheses
+            while (line[run] != '\"') run++;
+            // this is where the name ends
+            line[run] = '\0';
+            run++;
+          }
+          else
+          {
+            // this is where the name starts
+            name = &line[run];
+            // skip until second comma
+            while (line[run] != ',') run++;
+            // this is where the name ends
+            line[run] = '\0';
+          }
+          if (description) sprintf(description, name);
+          run++;
+          // skip two commas
+          while (line[run] != ',') run++;
+          run++;
+          while (line[run] != ',') run++;
+          run++;
+          // scan
+          if (sscanf(&line[run], "%d,%d", &units, &dummy) != 2)
+          {
+            fprintf(stderr, "failed to scan units from '%s'", line);
+            return false;
+          }
+          if (!set_VerticalUnitsGeoKey(units))
+          {
+            fprintf(stderr, "units %d of EPSG code %d not implemented.\n", units, value);
+            return false;
+          }
+          vertical_geokey = value;
+          return true;
+        }
+      }
+    }
+    fprintf(stderr, "EPSG code %d not found in 'vertcs.csv' file\n", value);
+    fclose(file);
+    file = 0;
   }
-  return true;
+  fprintf(stderr, "set_VerticalCSTypeGeoKey: look-up for %d not implemented\012", value);
+  return false;
 }
 
 short GeoProjectionConverter::get_VerticalCSTypeGeoKey()
@@ -3071,7 +4323,7 @@ bool GeoProjectionConverter::set_reference_ellipsoid(int id, char* description)
   ellipsoid->eccentricity_squared = ellipsoid_list[id].eccentricitySquared;
   ellipsoid->inverse_flattening = ellipsoid_list[id].inverseFlattening;
   ellipsoid->eccentricity_prime_squared = (ellipsoid->eccentricity_squared)/(1-ellipsoid->eccentricity_squared);
-  ellipsoid->polar_radius = ellipsoid->equatorial_radius*sqrt(1-ellipsoid->eccentricity_squared);    
+  ellipsoid->polar_radius = ellipsoid->equatorial_radius*sqrt(1-ellipsoid->eccentricity_squared);
   ellipsoid->eccentricity = sqrt(ellipsoid->eccentricity_squared);
   ellipsoid->eccentricity_e1 = (1-sqrt(1-ellipsoid->eccentricity_squared))/(1+sqrt(1-ellipsoid->eccentricity_squared));
 
@@ -3129,7 +4381,7 @@ bool GeoProjectionConverter::set_gcs(short code, char* description)
   else if (code == GEO_GCS_GDA94)
   {
     set_reference_ellipsoid(GEO_ELLIPSOID_GRS1980);
-    sprintf(gcs_name, "GDA84");
+    sprintf(gcs_name, "GDA94");
     datum_code = gcs_code + 2000;
     sprintf(datum_name, "Geocentric_Datum_of_Australia_1994");
     spheroid_code = GEO_SPHEROID_GRS80;
@@ -3157,6 +4409,11 @@ bool GeoProjectionConverter::set_gcs(short code, char* description)
     datum_code = 6140;
     sprintf(datum_name, "NAD83_Canadian_Spatial_Reference_System");
     spheroid_code = GEO_SPHEROID_GRS80;
+  }
+  else if (code == GEO_GCS_NAD83_PA11)
+  {
+    set_reference_ellipsoid(GEO_ELLIPSOID_GRS1980);
+    sprintf(gcs_name, "NAD83(PA11)");
   }
   else if (code == GEO_GCS_NAD83_2011)
   {
@@ -3219,6 +4476,14 @@ bool GeoProjectionConverter::set_gcs(short code, char* description)
     sprintf(datum_name, "CH1903");
     spheroid_code = GEO_SPHEROID_BESSEL1841;
   }
+  else if (code == GEO_GCS_OSGB1936)
+  {
+    set_reference_ellipsoid(GEO_ELLIPSOID_AIRY);
+    sprintf(gcs_name, "OSGB1936");
+    datum_code = gcs_code + 2000;
+    sprintf(datum_name, "OSGB1936");
+    spheroid_code = GEO_ELLIPSOID_AIRY;
+  }
   else
   {
     // try to look it up in 'gcs.csv' file
@@ -3248,10 +4513,10 @@ bool GeoProjectionConverter::set_gcs(short code, char* description)
           if (line[run] == '\"')
           {
             // remove opening parentheses
-            run++; 
+            run++;
             // this is where the name starts
             gname = &line[run];
-            run++; 
+            run++;
             // skip until closing parentheses
             while (line[run] != '\"') run++;
             // this is where the name ends
@@ -3283,10 +4548,10 @@ bool GeoProjectionConverter::set_gcs(short code, char* description)
           if (line[run] == '\"')
           {
             // remove opening parentheses
-            run++; 
+            run++;
             // this is where the name starts
             dname = &line[run];
-            run++; 
+            run++;
             // skip until closing parentheses
             while (line[run] != '\"') run++;
             // this is where the name ends
@@ -3317,9 +4582,9 @@ bool GeoProjectionConverter::set_gcs(short code, char* description)
             {
 //              fprintf(stderr, "set ellipsoid %d for EPSG code %d for '%s'\n", ellipsoid_id, value, gname);
               set_reference_ellipsoid(ellipsoid_id);
-              sprintf(gcs_name, gname);
+              sprintf(gcs_name, "%s", gname);
               datum_code = dcode;
-              sprintf(datum_name, dname);
+              sprintf(datum_name, "%s", dname);
               spheroid_code = value;
               done = true;
               break;
@@ -3340,7 +4605,7 @@ bool GeoProjectionConverter::set_gcs(short code, char* description)
       return false;
     }
   }
-  if (description) sprintf(description, gcs_name);
+  if (description) sprintf(description, "%s", gcs_name);
   return true;
 }
 
@@ -3580,7 +4845,7 @@ bool GeoProjectionConverter::set_target_utm_projection(char* description, const 
 // Conformal Conic  projection parameters as inputs and sets the corresponding
 // state variables.
 //
-// falseEastingMeter & falseNorthingMeter are just an offset in meters added 
+// falseEastingMeter & falseNorthingMeter are just an offset in meters added
 // to the final coordinate calculated.
 //
 // latOriginDegree & longMeridianDegree are the "center" latitiude and
@@ -3623,7 +4888,7 @@ void GeoProjectionConverter::set_lambert_conformal_conic_projection(double false
 /*
   * The function set_transverse_mercator_projection() receives the Tranverse
   * Mercator projection parameters as input and sets the corresponding state
-  * variables. 
+  * variables.
   * falseEastingMeter   : Easting/X in meters at the center of the projection
   * falseNorthingMeter  : Northing/Y in meters at the center of the projection
   * latOriginDegree     : Latitude in decimal degree at the origin of the projection
@@ -3659,11 +4924,11 @@ void GeoProjectionConverter::set_transverse_mercator_projection(double falseEast
 
 // Configure a Albers Equal Area Conic Projection
 //
-// The function set_albers_equal_area_conic_projection() receives the Albers 
+// The function set_albers_equal_area_conic_projection() receives the Albers
 // Equal Area Conic projection parameters as inputs and sets the corresponding
 // state variables.
 //
-// falseEastingMeter & falseNorthingMeter are just an offset in meters added 
+// falseEastingMeter & falseNorthingMeter are just an offset in meters added
 // to the final coordinate calculated.
 //
 // latCenterDegree & longCenterDegree are the "center" latitiude and
@@ -3705,11 +4970,11 @@ void GeoProjectionConverter::set_albers_equal_area_conic_projection(double false
 
 // Configure an Oblique Mercator Projection
 //
-// The function set_hotine_oblique_mercator_projection() receives the Hotine  
+// The function set_hotine_oblique_mercator_projection() receives the Hotine
 // Oblique Mercator projection parameters as inputs and sets the corresponding
 // state variables.
 //
-// falseEastingMeter & falseNorthingMeter are just an offset in meters added 
+// falseEastingMeter & falseNorthingMeter are just an offset in meters added
 // to the final coordinate calculated.
 //
 // latCenterDegree & longCenterDegree are the "center" latitiude and
@@ -3735,8 +5000,12 @@ void GeoProjectionConverter::set_hotine_oblique_mercator_projection(double false
   hom->hom_azimuth_degree = azimuthDegree;
   hom->hom_rectified_grid_angle_degree = rectifiedGridAngleDegree;
   hom->hom_scale_factor = scaleFactor;
+  hom->hom_latitude_of_center_radian = deg2rad*hom->hom_latitude_of_center_degree;
+  hom->hom_longitude_of_center_radian = deg2rad*hom->hom_longitude_of_center_degree;
+  hom->hom_azimuth_radian = deg2rad*hom->hom_azimuth_degree;
+  hom->hom_rectified_grid_angle_radian = deg2rad*hom->hom_rectified_grid_angle_degree;
   set_projection(hom, source);
-//  compute_hom_parameters(source);
+  compute_hom_parameters(source);
   if (description)
   {
     sprintf(description, "false east/north: %g/%g [m], center lat/long: %g/%g, azimuth: %g angle: %g scale: %g", hom->hom_false_easting_meter, hom->hom_false_northing_meter, hom->hom_latitude_of_center_degree, hom->hom_longitude_of_center_degree, hom->hom_azimuth_degree, hom->hom_rectified_grid_angle_degree, hom->hom_scale_factor);
@@ -3746,7 +5015,7 @@ void GeoProjectionConverter::set_hotine_oblique_mercator_projection(double false
 /*
   * The function set_oblique_stereographic_projection() receives the Oblique
   * Stereographic projection parameters as input and sets the corresponding
-  * state variables. 
+  * state variables.
   * falseEastingMeter   : Easting/X in meters at the center of the projection
   * falseNorthingMeter  : Northing/Y in meters at the center of the projection
   * latOriginDegree     : Latitude in decimal degree at the origin of the projection
@@ -3773,7 +5042,7 @@ void GeoProjectionConverter::set_oblique_stereographic_projection(double falseEa
   os->os_lat_origin_radian = deg2rad*os->os_lat_origin_degree;
   os->os_long_meridian_radian = deg2rad*os->os_long_meridian_degree;
   set_projection(os, source);
-//  compute_os_parameters(source);
+  compute_os_parameters(source);
   if (description)
   {
     sprintf(description, "false east/north: %g/%g [m], origin lat/meridian long: %g/%g, scale: %g", os->os_false_easting_meter, os->os_false_northing_meter, os->os_lat_origin_degree, os->os_long_meridian_degree, os->os_scale_factor);
@@ -3841,8 +5110,6 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
   bool utm_northern = false;
   int utm_zone = -1;
   bool is_mga = false;
-  char* sp = 0;
-  bool sp_nad27 = false;
   bool longlat = false;
   bool ecef = false;
 
@@ -3921,769 +5188,19 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
     ecef = true;
     gcs = GEO_GCS_WGS84;
     break;
-  case 26929: // PCS_NAD83_Alabama_East
-    sp_nad27 = false; sp = "AL_E";
-    break;
-  case 26930: // PCS_NAD83_Alabama_West
-    sp_nad27 = false; sp = "AL_W";
-    break;
-  case 26931: // PCS_NAD83_Alaska_zone_1
-    sp_nad27 = false; sp = "AK_1";
-    break;
-  case 26932: // PCS_NAD83_Alaska_zone_2
-    sp_nad27 = false; sp = "AK_2";
-    break;
-  case 26933: // PCS_NAD83_Alaska_zone_3
-    sp_nad27 = false; sp = "AK_3";
-    break;
-  case 26934: // PCS_NAD83_Alaska_zone_4
-    sp_nad27 = false; sp = "AK_4";
-    break;
-  case 26935: // PCS_NAD83_Alaska_zone_5
-    sp_nad27 = false; sp = "AK_5";
-    break;
-  case 26936: // PCS_NAD83_Alaska_zone_6
-    sp_nad27 = false; sp = "AK_6";
-    break;
-  case 26937: // PCS_NAD83_Alaska_zone_7
-    sp_nad27 = false; sp = "AK_7";
-    break;
-  case 26938: // PCS_NAD83_Alaska_zone_8
-    sp_nad27 = false; sp = "AK_8";
-    break;
-  case 26939: // PCS_NAD83_Alaska_zone_9
-    sp_nad27 = false; sp = "AK_9";
-    break;
-  case 26940: // PCS_NAD83_Alaska_zone_10
-    sp_nad27 = false; sp = "AK_10";
-    break;
-  case 26941: // PCS_NAD83_California_I
-    sp_nad27 = false; sp = "CA_I";
-    break;
-  case 26942: // PCS_NAD83_California_II
-    sp_nad27 = false; sp = "CA_II";
-    break;
-  case 26943: // PCS_NAD83_California_III
-    sp_nad27 = false; sp = "CA_III";
-    break;
-  case 26944: // PCS_NAD83_California_IV
-    sp_nad27 = false; sp = "CA_IV";
-    break;
-  case 26945: // PCS_NAD83_California_V
-    sp_nad27 = false; sp = "CA_V";
-    break;
-  case 26946: // PCS_NAD83_California_VI
-    sp_nad27 = false; sp = "CA_VI";
-    break;
-  case 26947: // PCS_NAD83_California_VII
-    sp_nad27 = false; sp = "CA_VII";
-    break;
-  case 26948: // PCS_NAD83_Arizona_East
-    sp_nad27 = false; sp = "AZ_E";
-    break;
-  case 26949: // PCS_NAD83_Arizona_Central
-    sp_nad27 = false; sp = "AZ_C";
-    break;
-  case 26950: // PCS_NAD83_Arizona_West
-    sp_nad27 = false; sp = "AZ_W";
-    break;
-  case 26951: // PCS_NAD83_Arkansas_North
-    sp_nad27 = false; sp = "AR_N";
-    break;
-  case 26952: // PCS_NAD83_Arkansas_South
-    sp_nad27 = false; sp = "AR_S";
-    break;
-  case 26953: // PCS_NAD83_Colorado_North
-    sp_nad27 = false; sp = "CO_N";
-    break;
-  case 26954: // PCS_NAD83_Colorado_Central
-    sp_nad27 = false; sp = "CO_C";
-    break;
-  case 26955: // PCS_NAD83_Colorado_South
-    sp_nad27 = false; sp = "CO_S";
-    break;
-  case 26956: // PCS_NAD83_Connecticut
-    sp_nad27 = false; sp = "CT";
-    break;
-  case 26957: // PCS_NAD83_Delaware
-    sp_nad27 = false; sp = "DE";
-    break;
-  case 26958: // PCS_NAD83_Florida_East
-    sp_nad27 = false; sp = "FL_E";
-    break;
-  case 26959: // PCS_NAD83_Florida_West
-    sp_nad27 = false; sp = "FL_W";
-    break;
-  case 26960: // PCS_NAD83_Florida_North
-    sp_nad27 = false; sp = "FL_N";
-    break;
-  case 26961: // PCS_NAD83_Hawaii_zone_1
-    sp_nad27 = false; sp = "HI_1";
-    break;
-  case 26962: // PCS_NAD83_Hawaii_zone_2
-    sp_nad27 = false; sp = "HI_2";
-    break;
-  case 26963: // PCS_NAD83_Hawaii_zone_3
-    sp_nad27 = false; sp = "HI_3";
-    break;
-  case 26964: // PCS_NAD83_Hawaii_zone_4
-    sp_nad27 = false; sp = "HI_4";
-    break;
-  case 26965: // PCS_NAD83_Hawaii_zone_5
-    sp_nad27 = false; sp = "HI_5";
-    break;
-  case 26966: // PCS_NAD83_Georgia_East
-    sp_nad27 = false; sp = "GA_E";
-    break;
-  case 26967: // PCS_NAD83_Georgia_West
-    sp_nad27 = false; sp = "GA_W";
-    break;
-  case 26968: // PCS_NAD83_Idaho_East
-    sp_nad27 = false; sp = "ID_E";
-    break;
-  case 26969: // PCS_NAD83_Idaho_Central
-    sp_nad27 = false; sp = "ID_C";
-    break;
-  case 26970: // PCS_NAD83_Idaho_West
-    sp_nad27 = false; sp = "ID_W";
-    break;
-  case 26971: // PCS_NAD83_Illinois_East
-    sp_nad27 = false; sp = "IL_E";
-    break;
-  case 26972: // PCS_NAD83_Illinois_West
-    sp_nad27 = false; sp = "IL_W";
-    break;
-  case 26973: // PCS_NAD83_Indiana_East
-    sp_nad27 = false; sp = "IN_E";
-    break;
-  case 26974: // PCS_NAD83_Indiana_West
-    sp_nad27 = false; sp = "IN_W";
-    break;
-  case 26975: // PCS_NAD83_Iowa_North
-    sp_nad27 = false; sp = "IA_N";
-    break;
-  case 26976: // PCS_NAD83_Iowa_South
-    sp_nad27 = false; sp = "IA_S";
-    break;
-  case 26977: // PCS_NAD83_Kansas_North
-    sp_nad27 = false; sp = "KS_N";
-    break;
-  case 26978: // PCS_NAD83_Kansas_South
-    sp_nad27 = false; sp = "KS_S";
-    break;
-  case 26979: // PCS_NAD83_Kentucky_North
-    sp_nad27 = false; sp = "KY_N";
-    break;
-  case 26980: // PCS_NAD83_Kentucky_South
-    sp_nad27 = false; sp = "KY_S";
-    break;
-  case 26981: // PCS_NAD83_Louisiana_North
-    sp_nad27 = false; sp = "LA_N";
-    break;
-  case 26982: // PCS_NAD83_Louisiana_South
-    sp_nad27 = false; sp = "LA_S";
-    break;
-  case 26983: // PCS_NAD83_Maine_East
-    sp_nad27 = false; sp = "ME_E";
-    break;
-  case 26984: // PCS_NAD83_Maine_West
-    sp_nad27 = false; sp = "ME_W";
-    break;
-  case 26985: // PCS_NAD83_Maryland
-    sp_nad27 = false; sp = "MD";
-    break;
-  case 26986: // PCS_NAD83_Massachusetts
-    sp_nad27 = false; sp = "M_M";
-    break;
-  case 26987: // PCS_NAD83_Massachusetts_Is
-    sp_nad27 = false; sp = "M_I";
-    break;
-  case 26988: // PCS_NAD83_Michigan_North
-    sp_nad27 = false; sp = "MI_N";
-    break;
-  case 26989: // PCS_NAD83_Michigan_Central
-    sp_nad27 = false; sp = "MI_C";
-    break;
-  case 26990: // PCS_NAD83_Michigan_South
-    sp_nad27 = false; sp = "MI_S";
-    break;
-  case 26991: // PCS_NAD83_Minnesota_North
-    sp_nad27 = false; sp = "MN_N";
-    break;
-  case 26992: // PCS_NAD83_Minnesota_Cent
-    sp_nad27 = false; sp = "MN_C";
-    break;
-  case 26993: // PCS_NAD83_Minnesota_South
-    sp_nad27 = false; sp = "MN_S";
-    break;
-  case 26994: // PCS_NAD83_Mississippi_East
-    sp_nad27 = false; sp = "MS_E";
-    break;
-  case 26995: // PCS_NAD83_Mississippi_West
-    sp_nad27 = false; sp = "MS_W";
-    break;
-  case 26996: // PCS_NAD83_Missouri_East
-    sp_nad27 = false; sp = "MO_E";
-    break;
-  case 26997: // PCS_NAD83_Missouri_Central
-    sp_nad27 = false; sp = "MO_C";
-    break;
-  case 26998: // PCS_NAD83_Missouri_West
-    sp_nad27 = false; sp = "MO_W";
-    break;
-  case 32100: // PCS_NAD83_Montana
-    sp_nad27 = false; sp = "MT";
-    break;
-  case 32104: // PCS_NAD83_Nebraska
-    sp_nad27 = false; sp = "NE";
-    break;
-  case 32107: // PCS_NAD83_Nevada_East
-    sp_nad27 = false; sp = "NV_E";
-    break;
-  case 32108: // PCS_NAD83_Nevada_Central
-    sp_nad27 = false; sp = "NV_C";
-    break;
-  case 32109: // PCS_NAD83_Nevada_West
-    sp_nad27 = false; sp = "NV_W";
-    break;
-  case 32110: // PCS_NAD83_New_Hampshire
-    sp_nad27 = false; sp = "NH";
-    break;
-  case 32111: // PCS_NAD83_New_Jersey
-    sp_nad27 = false; sp = "NJ";
-    break;
-  case 32112: // PCS_NAD83_New_Mexico_East
-    sp_nad27 = false; sp = "NM_E";
-    break;
-  case 32113: // PCS_NAD83_New_Mexico_Cent
-    sp_nad27 = false; sp = "NM_C";
-    break;
-  case 32114: // PCS_NAD83_New_Mexico_West
-    sp_nad27 = false; sp = "NM_W";
-    break;
-  case 32115: // PCS_NAD83_New_York_East
-    sp_nad27 = false; sp = "NY_E";
-    break;
-  case 32116: // PCS_NAD83_New_York_Central
-    sp_nad27 = false; sp = "NY_C";
-    break;
-  case 32117: // PCS_NAD83_New_York_West
-    sp_nad27 = false; sp = "NY_W";
-    break;
-  case 32118: // PCS_NAD83_New_York_Long_Is
-    sp_nad27 = false; sp = "NT_LI";
-    break;
-  case 32119: // PCS_NAD83_North_Carolina
-    sp_nad27 = false; sp = "NC";
-    break;
-  case 32120: // PCS_NAD83_North_Dakota_N
-    sp_nad27 = false; sp = "ND_N";
-    break;
-  case 32121: // PCS_NAD83_North_Dakota_S
-    sp_nad27 = false; sp = "ND_S";
-    break;
-  case 32122: // PCS_NAD83_Ohio_North
-    sp_nad27 = false; sp = "OH_N";
-    break;
-  case 32123: // PCS_NAD83_Ohio_South
-    sp_nad27 = false; sp = "OH_S";
-    break;
-  case 32124: // PCS_NAD83_Oklahoma_North
-    sp_nad27 = false; sp = "OK_N";
-    break;
-  case 32125: // PCS_NAD83_Oklahoma_South
-    sp_nad27 = false; sp = "OK_S";
-    break;
-  case 32126: // PCS_NAD83_Oregon_North
-    sp_nad27 = false; sp = "OR_N";
-    break;
-  case 32127: // PCS_NAD83_Oregon_South
-    sp_nad27 = false; sp = "OR_S";
-    break;
-  case 32128: // PCS_NAD83_Pennsylvania_N
-    sp_nad27 = false; sp = "PA_N";
-    break;
-  case 32129: // PCS_NAD83_Pennsylvania_S
-    sp_nad27 = false; sp = "PA_S";
-    break;
-  case 32130: // PCS_NAD83_Rhode_Island
-    sp_nad27 = false; sp = "RI";
-    break;
-  case 32133: // PCS_NAD83_South_Carolina
-    sp_nad27 = false; sp = "SC";
-    break;
-  case 32134: // PCS_NAD83_South_Dakota_N
-    sp_nad27 = false; sp = "SD_N";
-    break;
-  case 32135: // PCS_NAD83_South_Dakota_S
-    sp_nad27 = false; sp = "SD_S";
-    break;
-  case 32136: // PCS_NAD83_Tennessee
-    sp_nad27 = false; sp = "TN";
-    break;
-  case 32137: // PCS_NAD83_Texas_North
-    sp_nad27 = false; sp = "TX_N";
-    break;
-  case 32138: // PCS_NAD83_Texas_North_Cen
-    sp_nad27 = false; sp = "TX_NC";
-    break;
-  case 32139: // PCS_NAD83_Texas_Central
-    sp_nad27 = false; sp = "TX_C";
-    break;
-  case 32140: // PCS_NAD83_Texas_South_Cen
-    sp_nad27 = false; sp = "TX_SC";
-    break;
-  case 32141: // PCS_NAD83_Texas_South
-    sp_nad27 = false; sp = "TX_S";
-    break;
-  case 32142: // PCS_NAD83_Utah_North
-    sp_nad27 = false; sp = "UT_N";
-    break;
-  case 32143: // PCS_NAD83_Utah_Central
-    sp_nad27 = false; sp = "UT_C";
-    break;
-  case 32144: // PCS_NAD83_Utah_South
-    sp_nad27 = false; sp = "UT_S";
-    break;
-  case 32145: // PCS_NAD83_Vermont
-    sp_nad27 = false; sp = "VT";
-    break;
-  case 32146: // PCS_NAD83_Virginia_North
-    sp_nad27 = false; sp = "VA_N";
-    break;
-  case 32147: // PCS_NAD83_Virginia_South
-    sp_nad27 = false; sp = "VA_S";
-    break;
-  case 32148: // PCS_NAD83_Washington_North
-    sp_nad27 = false; sp = "WA_N";
-    break;
-  case 32149: // PCS_NAD83_Washington_South
-    sp_nad27 = false; sp = "WA_S";
-    break;
-  case 32150: // PCS_NAD83_West_Virginia_N
-    sp_nad27 = false; sp = "WV_N";
-    break;
-  case 32151: // PCS_NAD83_West_Virginia_S
-    sp_nad27 = false; sp = "WV_S";
-    break;
-  case 32152: // PCS_NAD83_Wisconsin_North
-    sp_nad27 = false; sp = "WI_N";
-    break;
-  case 32153: // PCS_NAD83_Wisconsin_Cen
-    sp_nad27 = false; sp = "WI_C";
-    break;
-  case 32154: // PCS_NAD83_Wisconsin_South
-    sp_nad27 = false; sp = "WI_S";
-    break;
-  case 32155: // PCS_NAD83_Wyoming_East
-    sp_nad27 = false; sp = "WY_E";
-    break;
-  case 32156: // PCS_NAD83_Wyoming_E_Cen
-    sp_nad27 = false; sp = "WY_EC";
-    break;
-  case 32157: // PCS_NAD83_Wyoming_W_Cen
-    sp_nad27 = false; sp = "WY_WC";
-    break;
-  case 32158: // PCS_NAD83_Wyoming_West
-    sp_nad27 = false; sp = "WY_W";
-    break;
-  case 32161: // PCS_NAD83_Puerto_Rico_Virgin_Is
-    sp_nad27 = false; sp = "PR";
-    break;
-  case 26729: // PCS_NAD27_Alabama_East
-    sp_nad27 = true; sp = "AL_E";
-    break;
-  case 26730: // PCS_NAD27_Alabama_West
-    sp_nad27 = true; sp = "AL_W";
-    break;
-  case 26732: // PCS_NAD27_Alaska_zone_2
-    sp_nad27 = true; sp = "AK_2";
-    break;
-  case 26733: // PCS_NAD27_Alaska_zone_3
-    sp_nad27 = true; sp = "AK_3";
-    break;
-  case 26734: // PCS_NAD27_Alaska_zone_4
-    sp_nad27 = true; sp = "AK_4";
-    break;
-  case 26735: // PCS_NAD27_Alaska_zone_5
-    sp_nad27 = true; sp = "AK_5";
-    break;
-  case 26736: // PCS_NAD27_Alaska_zone_6
-    sp_nad27 = true; sp = "AK_6";
-    break;
-  case 26737: // PCS_NAD27_Alaska_zone_7
-    sp_nad27 = true; sp = "AK_7";
-    break;
-  case 26738: // PCS_NAD27_Alaska_zone_8
-    sp_nad27 = true; sp = "AK_8";
-    break;
-  case 26739: // PCS_NAD27_Alaska_zone_9
-    sp_nad27 = true; sp = "AK_9";
-    break;
-  case 26740: // PCS_NAD27_Alaska_zone_10
-    sp_nad27 = true; sp = "AK_10";
-    break;
-  case 26741: // PCS_NAD27_California_I
-    sp_nad27 = true; sp = "CA_I";
-    break;
-  case 26742: // PCS_NAD27_California_II
-    sp_nad27 = true; sp = "CA_II";
-    break;
-  case 26743: // PCS_NAD27_California_III
-    sp_nad27 = true; sp = "CA_III";
-    break;
-  case 26744: // PCS_NAD27_California_IV
-    sp_nad27 = true; sp = "CA_IV";
-    break;
-  case 26745: // PCS_NAD27_California_V
-    sp_nad27 = true; sp = "CA_V";
-    break;
-  case 26746: // PCS_NAD27_California_VI
-    sp_nad27 = true; sp = "CA_VI";
-    break;
-  case 26747: // PCS_NAD27_California_VII
-    sp_nad27 = true; sp = "CA_VII";
-    break;
-  case 26748: // PCS_NAD27_Arizona_East
-    sp_nad27 = true; sp = "AZ_E";
-    break;
-  case 26749: // PCS_NAD27_Arizona_Central
-    sp_nad27 = true; sp = "AZ_C";
-    break;
-  case 26750: // PCS_NAD27_Arizona_West
-    sp_nad27 = true; sp = "AZ_W";
-    break;
-  case 26751: // PCS_NAD27_Arkansas_North
-    sp_nad27 = true; sp = "AR_N";
-    break;
-  case 26752: // PCS_NAD27_Arkansas_South
-    sp_nad27 = true; sp = "AR_S";
-    break;
-  case 26753: // PCS_NAD27_Colorado_North
-    sp_nad27 = true; sp = "CO_N";
-    break;
-  case 26754: // PCS_NAD27_Colorado_Central
-    sp_nad27 = true; sp = "CO_C";
-    break;
-  case 26755: // PCS_NAD27_Colorado_South
-    sp_nad27 = true; sp = "CO_S";
-    break;
-  case 26756: // PCS_NAD27_Connecticut
-    sp_nad27 = true; sp = "CT";
-    break;
-  case 26757: // PCS_NAD27_Delaware
-    sp_nad27 = true; sp = "DE";
-    break;
-  case 26758: // PCS_NAD27_Florida_East
-    sp_nad27 = true; sp = "FL_E";
-    break;
-  case 26759: // PCS_NAD27_Florida_West
-    sp_nad27 = true; sp = "FL_W";
-    break;
-  case 26760: // PCS_NAD27_Florida_North
-    sp_nad27 = true; sp = "FL_N";
-    break;
-  case 26761: // PCS_NAD27_Hawaii_zone_1
-    sp_nad27 = true; sp = "HI_1";
-    break;
-  case 26762: // PCS_NAD27_Hawaii_zone_2
-    sp_nad27 = true; sp = "HI_2";
-    break;
-  case 26763: // PCS_NAD27_Hawaii_zone_3
-    sp_nad27 = true; sp = "HI_3";
-    break;
-  case 26764: // PCS_NAD27_Hawaii_zone_4
-    sp_nad27 = true; sp = "HI_4";
-    break;
-  case 26765: // PCS_NAD27_Hawaii_zone_5
-    sp_nad27 = true; sp = "HI_5";
-    break;
-  case 26766: // PCS_NAD27_Georgia_East
-    sp_nad27 = true; sp = "GA_E";
-    break;
-  case 26767: // PCS_NAD27_Georgia_West
-    sp_nad27 = true; sp = "GA_W";
-    break;
-  case 26768: // PCS_NAD27_Idaho_East
-    sp_nad27 = true; sp = "ID_E";
-    break;
-  case 26769: // PCS_NAD27_Idaho_Central
-    sp_nad27 = true; sp = "ID_C";
-    break;
-  case 26770: // PCS_NAD27_Idaho_West
-    sp_nad27 = true; sp = "ID_W";
-    break;
-  case 26771: // PCS_NAD27_Illinois_East
-    sp_nad27 = true; sp = "IL_E";
-    break;
-  case 26772: // PCS_NAD27_Illinois_West
-    sp_nad27 = true; sp = "IL_W";
-    break;
-  case 26773: // PCS_NAD27_Indiana_East
-    sp_nad27 = true; sp = "IN_E";
-    break;
-  case 26774: // PCS_NAD27_Indiana_West
-    sp_nad27 = true; sp = "IN_W";
-    break;
-  case 26775: // PCS_NAD27_Iowa_North
-    sp_nad27 = true; sp = "IA_N";
-    break;
-  case 26776: // PCS_NAD27_Iowa_South
-    sp_nad27 = true; sp = "IA_S";
-    break;
-  case 26777: // PCS_NAD27_Kansas_North
-    sp_nad27 = true; sp = "KS_N";
-    break;
-  case 26778: // PCS_NAD27_Kansas_South
-    sp_nad27 = true; sp = "KS_S";
-    break;
-  case 26779: // PCS_NAD27_Kentucky_North
-    sp_nad27 = true; sp = "KY_N";
-    break;
-  case 26780: // PCS_NAD27_Kentucky_South
-    sp_nad27 = true; sp = "KY_S";
-    break;
-  case 26781: // PCS_NAD27_Louisiana_North
-    sp_nad27 = true; sp = "LA_N";
-    break;
-  case 26782: // PCS_NAD27_Louisiana_South
-    sp_nad27 = true; sp = "LA_S";
-    break;
-  case 26783: // PCS_NAD27_Maine_East
-    sp_nad27 = true; sp = "ME_E";
-    break;
-  case 26784: // PCS_NAD27_Maine_West
-    sp_nad27 = true; sp = "ME_W";
-    break;
-  case 26785: // PCS_NAD27_Maryland
-    sp_nad27 = true; sp = "MD";
-    break;
-  case 26786: // PCS_NAD27_Massachusetts
-    sp_nad27 = true; sp = "M_M";
-    break;
-  case 26787: // PCS_NAD27_Massachusetts_Is
-    sp_nad27 = true; sp = "M_I";
-    break;
-  case 26788: // PCS_NAD27_Michigan_North
-    sp_nad27 = true; sp = "MI_N";
-    break;
-  case 26789: // PCS_NAD27_Michigan_Central
-    sp_nad27 = true; sp = "MI_C";
-    break;
-  case 26790: // PCS_NAD27_Michigan_South
-    sp_nad27 = true; sp = "MI_S";
-    break;
-  case 26791: // PCS_NAD27_Minnesota_North
-    sp_nad27 = true; sp = "MN_N";
-    break;
-  case 26792: // PCS_NAD27_Minnesota_Cent
-    sp_nad27 = true; sp = "MN_C";
-    break;
-  case 26793: // PCS_NAD27_Minnesota_South
-    sp_nad27 = true; sp = "MN_S";
-    break;
-  case 26794: // PCS_NAD27_Mississippi_East
-    sp_nad27 = true; sp = "MS_E";
-    break;
-  case 26795: // PCS_NAD27_Mississippi_West
-    sp_nad27 = true; sp = "MS_W";
-    break;
-  case 26796: // PCS_NAD27_Missouri_East
-    sp_nad27 = true; sp = "MO_E";
-    break;
-  case 26797: // PCS_NAD27_Missouri_Central
-    sp_nad27 = true; sp = "MO_C";
-    break;
-  case 26798: // PCS_NAD27_Missouri_West
-    sp_nad27 = true; sp = "MO_W";
-    break;
-  case 32001: // PCS_NAD27_Montana_North
-    sp_nad27 = true; sp = "MT_N";
-    break;
-  case 32002: // PCS_NAD27_Montana_Central
-    sp_nad27 = true; sp = "MT_C";
-    break;
-  case 32003: // PCS_NAD27_Montana_South
-    sp_nad27 = true; sp = "MT_S";
-    break;
-  case 32005: // PCS_NAD27_Nebraska_North
-    sp_nad27 = true; sp = "NE_N";
-    break;
-  case 32006: // PCS_NAD27_Nebraska_South
-    sp_nad27 = true; sp = "NE_S";
-    break;
-  case 32007: // PCS_NAD27_Nevada_East
-    sp_nad27 = true; sp = "NV_E";
-    break;
-  case 32008: // PCS_NAD27_Nevada_Central
-    sp_nad27 = true; sp = "NV_C";
-    break;
-  case 32009: // PCS_NAD27_Nevada_West
-    sp_nad27 = true; sp = "NV_W";
-    break;
-  case 32010: // PCS_NAD27_New_Hampshire
-    sp_nad27 = true; sp = "NH";
-    break;
-  case 32011: // PCS_NAD27_New_Jersey
-    sp_nad27 = true; sp = "NJ";
-    break;
-  case 32012: // PCS_NAD27_New_Mexico_East
-    sp_nad27 = true; sp = "NM_E";
-    break;
-  case 32013: // PCS_NAD27_New_Mexico_Cent
-    sp_nad27 = true; sp = "NM_C";
-    break;
-  case 32014: // PCS_NAD27_New_Mexico_West
-    sp_nad27 = true; sp = "NM_W";
-    break;
-  case 32015: // PCS_NAD27_New_York_East
-    sp_nad27 = true; sp = "NY_E";
-    break;
-  case 32016: // PCS_NAD27_New_York_Central
-    sp_nad27 = true; sp = "NY_C";
-    break;
-  case 32017: // PCS_NAD27_New_York_West
-    sp_nad27 = true; sp = "NY_W";
-    break;
-  case 32018: // PCS_NAD27_New_York_Long_Is
-    sp_nad27 = true; sp = "NT_LI";
-    break;
-  case 32019: // PCS_NAD27_North_Carolina
-    sp_nad27 = true; sp = "NC";
-    break;
-  case 32020: // PCS_NAD27_North_Dakota_N
-    sp_nad27 = true; sp = "ND_N";
-    break;
-  case 32021: // PCS_NAD27_North_Dakota_S
-    sp_nad27 = true; sp = "ND_S";
-    break;
-  case 32022: // PCS_NAD27_Ohio_North
-    sp_nad27 = true; sp = "OH_N";
-    break;
-  case 32023: // PCS_NAD27_Ohio_South
-    sp_nad27 = true; sp = "OH_S";
-    break;
-  case 32024: // PCS_NAD27_Oklahoma_North
-    sp_nad27 = true; sp = "OK_N";
-    break;
-  case 32025: // PCS_NAD27_Oklahoma_South
-    sp_nad27 = true; sp = "OK_S";
-    break;
-  case 32026: // PCS_NAD27_Oregon_North
-    sp_nad27 = true; sp = "OR_N";
-    break;
-  case 32027: // PCS_NAD27_Oregon_South
-    sp_nad27 = true; sp = "OR_S";
-    break;
-  case 32028: // PCS_NAD27_Pennsylvania_N
-    sp_nad27 = true; sp = "PA_N";
-    break;
-  case 32029: // PCS_NAD27_Pennsylvania_S
-    sp_nad27 = true; sp = "PA_S";
-    break;
-  case 32030: // PCS_NAD27_Rhode_Island
-    sp_nad27 = true; sp = "RI";
-    break;
-  case 32031: // PCS_NAD27_South_Carolina_N
-    sp_nad27 = true; sp = "SC_N";
-    break;
-  case 32033: // PCS_NAD27_South_Carolina_S
-    sp_nad27 = true; sp = "SC_S";
-    break;
-  case 32034: // PCS_NAD27_South_Dakota_N
-    sp_nad27 = true; sp = "SD_N";
-    break;
-  case 32035: // PCS_NAD27_South_Dakota_S
-    sp_nad27 = true; sp = "SD_S";
-    break;
-  case 32036: // PCS_NAD27_Tennessee
-    sp_nad27 = true; sp = "TN";
-    break;
-  case 32037: // PCS_NAD27_Texas_North
-    sp_nad27 = true; sp = "TX_N";
-    break;
-  case 32038: // PCS_NAD27_Texas_North_Cen
-    sp_nad27 = true; sp = "TX_NC";
-    break;
-  case 32039: // PCS_NAD27_Texas_Central
-    sp_nad27 = true; sp = "TX_C";
-    break;
-  case 32040: // PCS_NAD27_Texas_South_Cen
-    sp_nad27 = true; sp = "TX_SC";
-    break;
-  case 32041: // PCS_NAD27_Texas_South
-    sp_nad27 = true; sp = "TX_S";
-    break;
-  case 32042: // PCS_NAD27_Utah_North
-    sp_nad27 = true; sp = "UT_N";
-    break;
-  case 32043: // PCS_NAD27_Utah_Central
-    sp_nad27 = true; sp = "UT_C";
-    break;
-  case 32044: // PCS_NAD27_Utah_South
-    sp_nad27 = true; sp = "UT_S";
-    break;
-  case 32045: // PCS_NAD27_Vermont
-    sp_nad27 = true; sp = "VT";
-    break;
-  case 32046: // PCS_NAD27_Virginia_North
-    sp_nad27 = true; sp = "VA_N";
-    break;
-  case 32047: // PCS_NAD27_Virginia_South
-    sp_nad27 = true; sp = "VA_S";
-    break;
-  case 32048: // PCS_NAD27_Washington_North
-    sp_nad27 = true; sp = "WA_N";
-    break;
-  case 32049: // PCS_NAD27_Washington_South
-    sp_nad27 = true; sp = "WA_S";
-    break;
-  case 32050: // PCS_NAD27_West_Virginia_N
-    sp_nad27 = true; sp = "WV_N";
-    break;
-  case 32051: // PCS_NAD27_West_Virginia_S
-    sp_nad27 = true; sp = "WV_S";
-    break;
-  case 32052: // PCS_NAD27_Wisconsin_North
-    sp_nad27 = true; sp = "WI_N";
-    break;
-  case 32053: // PCS_NAD27_Wisconsin_Cen
-    sp_nad27 = true; sp = "WI_C";
-    break;
-  case 32054: // PCS_NAD27_Wisconsin_South
-    sp_nad27 = true; sp = "WI_S";
-    break;
-  case 32055: // PCS_NAD27_Wyoming_East
-    sp_nad27 = true; sp = "WY_E";
-    break;
-  case 32056: // PCS_NAD27_Wyoming_E_Cen
-    sp_nad27 = true; sp = "WY_EC";
-    break;
-  case 32057: // PCS_NAD27_Wyoming_W_Cen
-    sp_nad27 = true; sp = "WY_WC";
-    break;
-  case 32058: // PCS_NAD27_Wyoming_West
-    sp_nad27 = true; sp = "WY_W";
-    break;
-  case 32059: // PCS_NAD27_Puerto_Rico
-    sp_nad27 = true; sp = "PR";
-    break;
-  case 32060: // PCS_NAD27_St_Croix
-    sp_nad27 = true; sp = "St.Croix";
-    break;
   case EPSG_EOV_HD72:     // should really be Hotine_Oblique_Mercator (but is special case with 90 degree angle that reduces to TM)
     set_gcs(GEO_GCS_HD72);
     set_transverse_mercator_projection(650000.0, 200000.0, 47.14439372222222, 19.04857177777778, 0.99993, 0, source, "EOV / HD72 / Hungarian National Grid");
     set_geokey(value, source);
     set_coordinates_in_meter(source);
-    if (description) sprintf(description, gcs_name);
+    if (description) sprintf(description, "%s", gcs_name);
     return true;
   case EPSG_CH1903_LV03:  // should really be Hotine_Oblique_Mercator (but is special case with 90 degree angle that reduces to TM)
     set_gcs(GEO_GCS_CH1903);
     set_transverse_mercator_projection(600000.0, 200000.0, 46.95240555555556, 7.439583333333333, 1.0, 0, source, "CH1903 / LV03");
     set_geokey(value, source);
     set_coordinates_in_meter(source);
-    if (description) sprintf(description, gcs_name);
+    if (description) sprintf(description, "%s", gcs_name);
     return true;
   default:
     // try to look it up in 'pcs.csv' file
@@ -4703,6 +5220,10 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
       {
         if (epsg_code == value)
         {
+          // found the code. no need to read file any further
+          fclose(file);
+          file = 0;
+          // parse the current line
           char* name;
           int dummy, units, gcs, transform, run = 0;;
           // skip until first comma
@@ -4712,10 +5233,10 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
           if (line[run] == '\"')
           {
             // remove opening parentheses
-            run++; 
+            run++;
             // this is where the name starts
             name = &line[run];
-            run++; 
+            run++;
             // skip until closing parentheses
             while (line[run] != '\"') run++;
             // this is where the name ends
@@ -4738,7 +5259,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             fprintf(stderr, "failed to scan units, gcs, and transform from '%s'", line);
             return false;
           }
-          if (!set_ProjLinearUnitsGeoKey(units))
+          if (!set_ProjLinearUnitsGeoKey(units, source))
           {
             fprintf(stderr, "units %d of EPSG code %d not implemented.\n", units, value);
             return false;
@@ -4778,7 +5299,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             int unit_false_northing;
             if (sscanf(&line[run], "%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d", &latitude_of_origin, &unit_latitude_of_origin, &dummy, &central_meridian, &unit_central_meridian, &dummy, &scale_factor, &dummy, &dummy, &false_easting, &unit_false_easting, &dummy, &false_northing, &unit_false_northing) != 14)
             {
-              fprintf(stderr, "failed to scan TM parameters from '%s'", line);
+              fprintf(stderr, "failed to scan TM parameters from '%s'\n", line);
               return false;
             }
             double latitude_of_origin_decdeg = unit2decdeg(latitude_of_origin, unit_latitude_of_origin);
@@ -4787,7 +5308,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             double false_northing_meter = unit2meter(false_northing, unit_false_northing);
             set_transverse_mercator_projection(false_easting_meter, false_northing_meter, latitude_of_origin_decdeg, central_meridian_decdeg, scale_factor, 0, source, name);
             set_geokey(value, source);
-            if (description) sprintf(description, name);
+            if (description) sprintf(description, "%s", name);
             return true;
           }
           else if (transform == 9802) // CT_LambertConfConic_2SP
@@ -4806,7 +5327,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             int unit_false_northing;
             if (sscanf(&line[run], "%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d", &latitude_of_origin, &unit_latitude_of_origin, &dummy, &central_meridian, &unit_central_meridian, &dummy, &standard_parallel_1, &unit_standard_parallel_1, &dummy, &standard_parallel_2, &unit_standard_parallel_2, &dummy, &false_easting, &unit_false_easting, &dummy, &false_northing, &unit_false_northing) != 17)
             {
-              fprintf(stderr, "failed to scan LCC parameters from '%s'", line);
+              fprintf(stderr, "failed to scan LCC(2SP) parameters from '%s'\n", line);
               return false;
             }
             double latitude_of_origin_decdeg = unit2decdeg(latitude_of_origin, unit_latitude_of_origin);
@@ -4817,7 +5338,42 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             double false_northing_meter = unit2meter(false_northing, unit_false_northing);
             set_lambert_conformal_conic_projection(false_easting_meter, false_northing_meter, latitude_of_origin_decdeg, central_meridian_decdeg, standard_parallel_1_decdeg, standard_parallel_2_decdeg, 0, source, name);
             set_geokey(value, source);
-            if (description) sprintf(description, name);
+            if (description) sprintf(description, "%s", name);
+            return true;
+          }
+          else if (transform == 9801) // CT_LambertConfConic_1SP
+          {
+            double latitude_of_natural_origin;
+            int unit_latitude_of_natural_origin;
+            double longitude_of_natural_origin;
+            int unit_longitude_of_natural_origin;
+            double scale_factor_at_natural_origin;
+            double false_easting;
+            int unit_false_easting;
+            double false_northing;
+            int unit_false_northing;
+
+            if (sscanf(&line[run], "%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d", &latitude_of_natural_origin, &unit_latitude_of_natural_origin, &dummy, &longitude_of_natural_origin, &unit_longitude_of_natural_origin, &dummy, &scale_factor_at_natural_origin, &dummy, &dummy, &false_easting, &unit_false_easting, &dummy, &false_northing, &unit_false_northing) != 14)
+            {
+              fprintf(stderr, "failed to scan LCC(1SP) parameters from '%s'\n", line);
+              return false;
+            }
+            double latitude_of_natural_origin_decdeg = unit2decdeg(latitude_of_natural_origin, unit_latitude_of_natural_origin);
+            double longitude_of_natural_origin_decdeg = unit2decdeg(longitude_of_natural_origin, unit_longitude_of_natural_origin);
+            double false_easting_meter = unit2meter(false_easting, unit_false_easting);
+            double false_northing_meter = unit2meter(false_northing, unit_false_northing);
+/*
+            fprintf(stderr, "Lambert Conic Conformal (1SP)\n");
+            fprintf(stderr, "Latitude of natural origin:  %.10g\n", latitude_of_natural_origin_decdeg);
+            fprintf(stderr, "Longitude of natural origin: %.10g\n", longitude_of_natural_origin_decdeg);
+            fprintf(stderr, "Scale factor at natural origin: %.10g\n", scale_factor_at_natural_origin);
+            fprintf(stderr, "False easting:  %.10g\n", false_easting_meter);
+            fprintf(stderr, "False northing: %.10g\n", false_northing_meter);
+*/
+            if (scale_factor_at_natural_origin != 1.0) fprintf(stderr, "\nWARNING: current implementation for Lambert Conic Conformal (1SP) ignores scale factor %.10g and uses 1.0 instead\n", scale_factor_at_natural_origin);
+            set_lambert_conformal_conic_projection(false_easting_meter, false_northing_meter, latitude_of_natural_origin_decdeg, longitude_of_natural_origin_decdeg, latitude_of_natural_origin, latitude_of_natural_origin, 0, source, name);
+            set_geokey(value, source);
+            if (description) sprintf(description, "%s", name);
             return true;
           }
           else if (transform == 9822) // CT_AlbersEqualArea
@@ -4836,7 +5392,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             int unit_false_northing;
             if (sscanf(&line[run], "%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d", &latitude_of_center, &unit_latitude_of_center, &dummy, &longitude_of_center, &unit_longitude_of_center, &dummy, &standard_parallel_1, &unit_standard_parallel_1, &dummy, &standard_parallel_2, &unit_standard_parallel_2, &dummy, &false_easting, &unit_false_easting, &dummy, &false_northing, &unit_false_northing) != 17)
             {
-              fprintf(stderr, "failed to scan AEAC parameters from '%s'", line);
+              fprintf(stderr, "failed to scan AEAC parameters from '%s'\n", line);
               return false;
             }
             double latitude_of_center_decdeg = unit2decdeg(latitude_of_center, unit_latitude_of_center);
@@ -4847,7 +5403,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             double false_northing_meter = unit2meter(false_northing, unit_false_northing);
             set_albers_equal_area_conic_projection(false_easting_meter, false_northing_meter, latitude_of_center_decdeg, longitude_of_center_decdeg, standard_parallel_1_decdeg, standard_parallel_2_decdeg, 0, source, name);
             set_geokey(value, source);
-            if (description) sprintf(description, name);
+            if (description) sprintf(description, "%s", name);
             return true;
           }
           else if (transform == 9812) // CT_HotineObliqueMercator
@@ -4867,7 +5423,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             double scale_factor;
             if (sscanf(&line[run], "%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf", &false_easting, &unit_false_easting, &dummy, &false_northing, &unit_false_northing, &dummy, &latitude_of_center, &unit_latitude_of_center, &dummy, &longitude_of_center, &unit_longitude_of_center, &dummy,&azimuth, &unit_azimuth, &dummy, &rectified_grid_angle, &unit_rectified_grid_angle, &dummy, &scale_factor) != 19)
             {
-              fprintf(stderr, "failed to scan HOM parameters from '%s'", line);
+              fprintf(stderr, "failed to scan HOM parameters from '%s'\n", line);
               return false;
             }
             double false_easting_meter = unit2meter(false_easting, unit_false_easting);
@@ -4878,7 +5434,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             double rectified_grid_angle_decdeg = unit2decdeg(rectified_grid_angle, unit_rectified_grid_angle);
             set_hotine_oblique_mercator_projection(false_easting_meter, false_northing_meter, latitude_of_center_decdeg, longitude_of_center_decdeg, azimuth_decdeg, rectified_grid_angle_decdeg, scale_factor, 0, source, name);
             set_geokey(value, source);
-            if (description) sprintf(description, name);
+            if (description) sprintf(description, "%s", name);
             return true;
           }
           else if (transform == 9809) // CT_ObliqueStereographic
@@ -4894,7 +5450,7 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             int unit_false_northing;
             if (sscanf(&line[run], "%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d,%d,%lf,%d", &latitude_of_origin, &unit_latitude_of_origin, &dummy, &central_meridian, &unit_central_meridian, &dummy, &scale_factor, &dummy, &dummy, &false_easting, &unit_false_easting, &dummy, &false_northing, &unit_false_northing) != 14)
             {
-              fprintf(stderr, "failed to scan OS parameters from '%s'", line);
+              fprintf(stderr, "failed to scan OS parameters from '%s'\n", line);
               return false;
             }
             double latitude_of_origin_decdeg = unit2decdeg(latitude_of_origin, unit_latitude_of_origin);
@@ -4903,10 +5459,10 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
             double false_northing_meter = unit2meter(false_northing, unit_false_northing);
             set_oblique_stereographic_projection(false_easting_meter, false_northing_meter, latitude_of_origin_decdeg, central_meridian_decdeg, scale_factor, 0, source, name);
             set_geokey(value, source);
-            if (description) sprintf(description, name);
+            if (description) sprintf(description, "%s", name);
             return true;
           }
-          else 
+          else
           {
             fprintf(stderr, "transform %d of EPSG code %d not implemented.\n", transform, value);
             return false;
@@ -4915,22 +5471,25 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
       }
     }
     fprintf(stderr, "EPSG code %d not found in 'pcs.csv' file\n", value);
+    fclose(file);
+    file = 0;
     return false;
-  }
-
-  if (gcs == -1)
-  {
-    if (utm_zone != -1) ellipsoid = GEO_GCS_WGS84;
-    else if (sp != 0) ellipsoid = (sp_nad27 ? GEO_GCS_NAD27 : GEO_GCS_NAD83);
   }
 
   if (gcs != -1)
   {
     set_gcs(gcs);
   }
-  else if (ellipsoid != -1)
+  else
   {
-    set_reference_ellipsoid(ellipsoid);
+    if (utm_zone != -1)
+    {
+      ellipsoid = GEO_GCS_WGS84;
+    }
+    if (ellipsoid != -1)
+    {
+      set_reference_ellipsoid(ellipsoid);
+    }
   }
 
   if (utm_zone != -1)
@@ -4940,42 +5499,6 @@ bool GeoProjectionConverter::set_epsg_code(short value, char* description, bool 
       set_geokey(value, source);
       return true;
     }
-  }
-
-  if (sp)
-  {
-    char* epsg_name = get_epsg_name_from_pcs_file(argv_zero, value);
-    if (sp_nad27)
-    {
-      if (set_state_plane_nad27_lcc(sp, description, source, epsg_name))
-      {
-        check_geokey(value, source);
-        free(epsg_name);
-        return true;
-      }
-      if (set_state_plane_nad27_tm(sp, description, source, epsg_name))
-      {
-        check_geokey(value, source);
-        free(epsg_name);
-        return true;
-      }
-    }
-    else
-    {
-      if (set_state_plane_nad83_lcc(sp, description, source, epsg_name))
-      {
-        check_geokey(value, source);
-        free(epsg_name);
-        return true;
-      }
-      if (set_state_plane_nad83_tm(sp, description, source, epsg_name))
-      {
-        check_geokey(value, source);
-        free(epsg_name);
-        return true;
-      }
-    }
-    free(epsg_name);
   }
 
   if (longlat)
@@ -5015,21 +5538,7 @@ bool GeoProjectionConverter::set_state_plane_nad27_lcc(const char* zone, char* d
   {
     if (strcmp(zone, state_plane_lcc_nad27_list[i].zone) == 0)
     {
-      set_gcs(GEO_GCS_NAD27);
-      set_lambert_conformal_conic_projection(state_plane_lcc_nad27_list[i].falseEastingMeter, state_plane_lcc_nad27_list[i].falseNorthingMeter, state_plane_lcc_nad27_list[i].latOriginDegree, state_plane_lcc_nad27_list[i].longMeridianDegree, state_plane_lcc_nad27_list[i].firstStdParallelDegree, state_plane_lcc_nad27_list[i].secondStdParallelDegree, 0, source, name);
-      set_geokey(state_plane_lcc_nad27_list[i].geokey, source);
-      if (description)
-      {
-        if (name)
-        {
-          sprintf(description, "%.255s", name);
-        }
-        else
-        {
-          sprintf(description, "stateplane27 %s", state_plane_lcc_nad27_list[i].zone);
-        }
-      }
-      return true;
+      return set_epsg_code(state_plane_lcc_nad27_list[i].geokey, description, source);
     }
     i++;
   }
@@ -5062,21 +5571,7 @@ bool GeoProjectionConverter::set_state_plane_nad83_lcc(const char* zone, char* d
   {
     if (strcmp(zone, state_plane_lcc_nad83_list[i].zone) == 0)
     {
-      set_gcs(GEO_GCS_NAD83);
-      set_lambert_conformal_conic_projection(state_plane_lcc_nad83_list[i].falseEastingMeter, state_plane_lcc_nad83_list[i].falseNorthingMeter, state_plane_lcc_nad83_list[i].latOriginDegree, state_plane_lcc_nad83_list[i].longMeridianDegree, state_plane_lcc_nad83_list[i].firstStdParallelDegree, state_plane_lcc_nad83_list[i].secondStdParallelDegree, 0, source, name);
-      set_geokey(state_plane_lcc_nad83_list[i].geokey, source);
-      if (description)
-      {
-        if (name)
-        {
-          sprintf(description, "%.255s", name);
-        }
-        else
-        {
-          sprintf(description, "stateplane83 %s", state_plane_lcc_nad83_list[i].zone);
-        }
-      }
-      return true;
+      return set_epsg_code(state_plane_lcc_nad83_list[i].geokey, description, source);
     }
     i++;
   }
@@ -5109,21 +5604,7 @@ bool GeoProjectionConverter::set_state_plane_nad27_tm(const char* zone, char* de
   {
     if (strcmp(zone, state_plane_tm_nad27_list[i].zone) == 0)
     {
-      set_gcs(GEO_GCS_NAD27);
-      set_transverse_mercator_projection(state_plane_tm_nad27_list[i].falseEastingMeter, state_plane_tm_nad27_list[i].falseNorthingMeter, state_plane_tm_nad27_list[i].latOriginDegree, state_plane_tm_nad27_list[i].longMeridianDegree, state_plane_tm_nad27_list[i].scaleFactor, 0, source, name);
-      set_geokey(state_plane_tm_nad27_list[i].geokey, source);
-      if (description)
-      {
-        if (name)
-        {
-          sprintf(description, "%.255s", name);
-        }
-        else
-        {
-          sprintf(description, "stateplane27 %s", state_plane_tm_nad27_list[i].zone);
-        }
-      }
-      return true;
+      return set_epsg_code(state_plane_tm_nad27_list[i].geokey, description, source);
     }
     i++;
   }
@@ -5156,21 +5637,7 @@ bool GeoProjectionConverter::set_state_plane_nad83_tm(const char* zone, char* de
   {
     if (strcmp(zone, state_plane_tm_nad83_list[i].zone) == 0)
     {
-      set_gcs(GEO_GCS_NAD83);
-      set_transverse_mercator_projection(state_plane_tm_nad83_list[i].falseEastingMeter, state_plane_tm_nad83_list[i].falseNorthingMeter, state_plane_tm_nad83_list[i].latOriginDegree, state_plane_tm_nad83_list[i].longMeridianDegree, state_plane_tm_nad83_list[i].scaleFactor, 0, source, name);
-      set_geokey(state_plane_tm_nad83_list[i].geokey, source);
-      if (description)
-      {
-        if (name)
-        {
-          sprintf(description, "%.255s", name);
-        }
-        else
-        {
-          sprintf(description, "stateplane83 %s", state_plane_tm_nad83_list[i].zone);
-        }
-      }
-      return true;
+      return set_epsg_code(state_plane_tm_nad83_list[i].geokey, description, source);
     }
     i++;
   }
@@ -5320,10 +5787,76 @@ void GeoProjectionConverter::compute_aeac_parameters(bool source)
     aeac->aeac_rho0 = aeac->aeac_Albers_a_OVER_n * sqrt(aeac->aeac_C - nq0);
 }
 
-// converts UTM coords to lat/long.  Equations from USGS Bulletin 1532 
-// East Longitudes are positive, West longitudes are negative. 
+void GeoProjectionConverter::compute_hom_parameters(bool source)
+{
+  GeoProjectionParametersHOM* hom = (GeoProjectionParametersHOM*)(source ? source_projection : target_projection);
+
+  if (!hom || hom->type != GEO_PROJECTION_HOM) return;
+
+	double esp = ellipsoid->eccentricity * sin(hom->hom_latitude_of_center_radian);
+	double esp2 = esp * esp;
+	hom->hom_B = sqrt(1.0 + ellipsoid->eccentricity_squared * pow(cos(hom->hom_latitude_of_center_radian), 4) / (1.0 - ellipsoid->eccentricity_squared));
+	hom->hom_A = ellipsoid->equatorial_radius * hom->hom_B * hom->hom_scale_factor * sqrt(1.0 - ellipsoid->eccentricity_squared) / (1.0 - esp2);
+  double t = tan(PI/4 - hom->hom_latitude_of_center_radian/2) / pow((1.0 - esp) / (1.0 + esp), ellipsoid->eccentricity/2);
+  double t0 = (t < 0 ? 0 : t);
+	double D = hom->hom_B * sqrt(1.0 - ellipsoid->eccentricity_squared) / cos(hom->hom_latitude_of_center_radian) / sqrt(1.0 - esp2);
+  double F, D2;
+	if (D < 1.0)
+  {
+    D2 = 1.0;
+    F = D;
+  }
+	else
+  {
+    D2 = D * D;
+    if (hom->hom_latitude_of_center_radian < 0.0)
+    {
+      F = D - sqrt(D2 - 1.0);
+    }
+    else
+    {
+      F = D + sqrt(D2 - 1.0);
+    }
+  }
+	hom->hom_H = F * pow(t0, hom->hom_B);
+	hom->hom_g0 = asin(sin(hom->hom_azimuth_radian) / D);
+	hom->hom_l0 = (F - (1.0 / F)) / 2.0 * tan(hom->hom_g0);
+	if (fabs(hom->hom_l0 - 1.0) < EPSILON)
+  {
+    hom->hom_l0 = 1.0;
+  }
+	hom->hom_l0 = hom->hom_longitude_of_center_radian - (asin(hom->hom_l0) / hom->hom_B);
+}
+
+static double srat(double esinp, double exp)
+{
+  return pow((1.0 - esinp) / (1.0 + esinp), exp);
+}
+
+void GeoProjectionConverter::compute_os_parameters(bool source)
+{
+  GeoProjectionParametersOS* os = (GeoProjectionParametersOS*)(source ? source_projection : target_projection);
+
+  if (!os || os->type != GEO_PROJECTION_OS) return;
+
+  double sphi = sin(os->os_lat_origin_radian);
+  double cphi = cos(os->os_lat_origin_radian);
+  cphi *= cphi;
+
+  os->os_R2 = 2.0 * sqrt(1.0 - ellipsoid->eccentricity_squared) / (1.0 - ellipsoid->eccentricity_squared * sphi * sphi);
+  os->os_C = sqrt(1.0 + ellipsoid->eccentricity_squared * cphi * cphi / (1.0 - ellipsoid->eccentricity_squared));
+  os->os_phic0 = asin(sphi / os->os_C);
+  os->os_sinc0 = sin(os->os_phic0);
+  os->os_cosc0 = cos(os->os_phic0);
+  os->os_ratexp = 0.5 * os->os_C * ellipsoid->eccentricity;
+  os->os_K = tan(0.5 * os->os_phic0 + PI/4) / (pow(tan(0.5 * os->os_lat_origin_radian + PI/4), os->os_C) * srat(ellipsoid->eccentricity * sphi, os->os_ratexp));
+  os->os_gf = os->os_scale_factor * ellipsoid->equatorial_radius;
+}
+
+// converts UTM coords to lat/long.  Equations from USGS Bulletin 1532
+// East Longitudes are positive, West longitudes are negative.
 // North latitudes are positive, South latitudes are negative
-// Lat and LongDegree are in decimal degrees. 
+// Lat and LongDegree are in decimal degrees.
 // adapted from code written by Chuck Gantz- chuck.gantz@globalstar.com
 
 bool GeoProjectionConverter::UTMtoLL(const double UTMEastingMeter, const double UTMNorthingMeter, double& LatDegree,  double& LongDegree, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersUTM* utm) const
@@ -5341,7 +5874,7 @@ bool GeoProjectionConverter::UTMtoLL(const double UTMEastingMeter, const double 
   double M = y / k0;
   double mu = M/(ellipsoid->equatorial_radius*(1-ellipsoid->eccentricity_squared/4-3*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/64-5*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/256));
 
-  double phi1Rad = mu  + (3*ellipsoid->eccentricity_e1/2-27*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1/32)*sin(2*mu) 
+  double phi1Rad = mu  + (3*ellipsoid->eccentricity_e1/2-27*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1/32)*sin(2*mu)
                        + (21*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1/16-55*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1/32)*sin(4*mu)
                        + (151*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1*ellipsoid->eccentricity_e1/96)*sin(6*mu);
 
@@ -5361,8 +5894,8 @@ bool GeoProjectionConverter::UTMtoLL(const double UTMEastingMeter, const double 
   return true;
 }
 
-// converts lat/long to UTM coords.  Equations from USGS Bulletin 1532 
-// East Longitudes are positive, West longitudes are negative. 
+// converts lat/long to UTM coords.  Equations from USGS Bulletin 1532
+// East Longitudes are positive, West longitudes are negative.
 // North latitudes are positive, South latitudes are negative
 // LatDegree and LongDegree are in decimal degrees
 // adapted from code written by Chuck Gantz- chuck.gantz@globalstar.com
@@ -5375,7 +5908,7 @@ bool GeoProjectionConverter::compute_utm_zone(const double LatDegree, const doub
   utm->utm_zone_number = (int)((LongTemp + 180)/6) + 1;
   if( LatDegree >= 56.0 && LatDegree < 64.0 && LongTemp >= 3.0 && LongTemp < 12.0 ) utm->utm_zone_number = 32;
   // Special zones for Svalbard
-  if( LatDegree >= 72.0 && LatDegree < 84.0 ) 
+  if( LatDegree >= 72.0 && LatDegree < 84.0 )
   {
     if(      LongTemp >= 0.0  && LongTemp <  9.0 ) utm->utm_zone_number = 31;
     else if( LongTemp >= 9.0  && LongTemp < 21.0 ) utm->utm_zone_number = 33;
@@ -5410,7 +5943,7 @@ bool GeoProjectionConverter::compute_utm_zone(const double LatDegree, const doub
 bool GeoProjectionConverter::LLtoUTM(const double LatDegree, const double LongDegree, double &UTMEastingMeter, double &UTMNorthingMeter, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersUTM* utm) const
 {
   const double k0 = 0.9996;
-  
+
   // Make sure the longitude is between -180.00 .. 179.9
   double LongTemp = (LongDegree+180)-int((LongDegree+180)/360)*360-180; // -180.00 .. 179.9;
   double LatRad = LatDegree*deg2rad;
@@ -5422,11 +5955,11 @@ bool GeoProjectionConverter::LLtoUTM(const double LatDegree, const double LongDe
   double C = ellipsoid->eccentricity_prime_squared*cos(LatRad)*cos(LatRad);
   double A = cos(LatRad)*(LongRad-LongOriginRad);
 
-  double M = ellipsoid->equatorial_radius*((1  - ellipsoid->eccentricity_squared/4 - 3*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/64  - 5*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/256)*LatRad 
+  double M = ellipsoid->equatorial_radius*((1  - ellipsoid->eccentricity_squared/4 - 3*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/64  - 5*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/256)*LatRad
               - (3*ellipsoid->eccentricity_squared/8  + 3*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/32  + 45*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/1024)*sin(2*LatRad)
-             + (15*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/256 + 45*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/1024)*sin(4*LatRad) 
+             + (15*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/256 + 45*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/1024)*sin(4*LatRad)
              - (35*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared*ellipsoid->eccentricity_squared/3072)*sin(6*LatRad));
-  
+
   UTMEastingMeter = (double)(k0*N*(A+(1-T+C)*A*A*A/6
           + (5-18*T+T*T+72*C-58*ellipsoid->eccentricity_prime_squared)*A*A*A*A*A/120)
           + 500000.0);
@@ -5445,11 +5978,11 @@ bool GeoProjectionConverter::LLtoUTM(const double LatDegree, const double LongDe
 /*
 An alternate way to convert Lambert Conic Conformal Northing/Easting coordinates
 into Latitude & Longitude coordinates. The code adapted from Brenor Brophy
-(brenor dot brophy at gmail dot com) Homepage:  www.brenorbrophy.com 
+(brenor dot brophy at gmail dot com) Homepage:  www.brenorbrophy.com
 */
 void lcc2ll( double e2, // Square of ellipsoid->eccentricity
              double a,  // Equatorial Radius
-             double firstStdParallel, 
+             double firstStdParallel,
              double secondStdParallel,
              double latOfOrigin,
              double longOfOrigin,
@@ -5487,7 +6020,7 @@ void lcc2ll( double e2, // Square of ellipsoid->eccentricity
    phi1  = PI_OVER_2 - 2*atan(t_*pow(((1-e*sin(phi0))/(1+e*sin(phi0))),e/2));
    phi2  = PI_OVER_2 - 2*atan(t_*pow(((1-e*sin(phi1))/(1+e*sin(phi1))),e/2));
   double phi  = PI_OVER_2 - 2*atan(t_*pow(((1-e*sin(phi2))/(1+e*sin(phi2))),e/2));
-  
+
   LatDegree = rad2deg*phi;
   LongDegree = rad2deg*lamda;
 }
@@ -5500,11 +6033,11 @@ meters) and are relative to the falseNorthing/falseEasting coordinate.
 Which in turn is relative to the Lat/Long of origin. The formula were
 obtained from URL: http://www.ihsenergy.com/epsg/guid7_2.html.
 The code adapted from Brenor Brophy (brenor dot brophy at gmail dot com)
-Homepage:  www.brenorbrophy.com 
+Homepage:  www.brenorbrophy.com
 */
 void ll2lcc( double e2, // Square of ellipsoid->eccentricity
              double a,  // Equatorial Radius
-             double firstStdParallel, 
+             double firstStdParallel,
              double secondStdParallel,
              double latOfOrigin,
              double longOfOrigin,
@@ -5545,7 +6078,7 @@ void ll2lcc( double e2, // Square of ellipsoid->eccentricity
   * coordinates, according to the current ellipsoid and Lambert Conformal
   * Conic projection parameters.
   *
-  *   LCCEastingMeter   : input Easting/X in meters 
+  *   LCCEastingMeter   : input Easting/X in meters
   *   LLCNorthingMeter  : input Northing/Y in meters
   *   LatDegree         : output Latitude in decimal degrees
   *   LongDegree        : output Longitude in decimal degrees
@@ -5632,18 +6165,18 @@ bool GeoProjectionConverter::LCCtoLL(const double LCCEastingMeter, const double 
   * The function LLtoLCC() converts Geodetic (latitude and longitude)
   * coordinates to Lambert Conformal Conic projection (easting and
   * northing) coordinates, according to the current ellipsoid and
-  * Lambert Conformal Conic projection parameters. 
+  * Lambert Conformal Conic projection parameters.
   *
   *   LatDegree         : input Latitude in decimal degrees
   *   LongDegree        : input Longitude in decimal degrees
-  *   LCCEastingMeter   : output Easting/X in meters 
+  *   LCCEastingMeter   : output Easting/X in meters
   *   LCCNorthingMeter  : output Northing/Y in meters
   *
   * adapted from code by Garrett Potts ((C) 2000 ImageLinks Inc.)
 */
 bool GeoProjectionConverter::LLtoLCC(const double LatDegree, const double LongDegree, double& LCCEastingMeter,  double& LCCNorthingMeter, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersLCC* lcc) const
 {
-/* >>> alternate way to compute (but seems less precise) <<< 
+/* >>> alternate way to compute (but seems less precise) <<<
   ll2lcc(ellipsoid->eccentricity_squared,
             ellipsoid->equatorial_radius,
             lcc->lcc_first_std_parallel_degree,
@@ -5699,12 +6232,12 @@ bool GeoProjectionConverter::LLtoLCC(const double LatDegree, const double LongDe
 /*
   * The function LLtoTM() converts geodetic (latitude and longitude)
   * coordinates to Transverse Mercator projection (easting and northing)
-  * coordinates, according to the current ellipsoid and Transverse Mercator 
-  * projection parameters.  
+  * coordinates, according to the current ellipsoid and Transverse Mercator
+  * projection parameters.
   *
   *   LatDegree        : input Latitude in decimal degrees
   *   LongDegree       : input Longitude in decimal degrees
-  *   TMEastingMeter   : output Easting/X in meters 
+  *   TMEastingMeter   : output Easting/X in meters
   *   TMNorthingMeter  : output Northing/Y in meters
   *
   * adapted from code by Garrett Potts ((C) 2000 ImageLinks Inc.)
@@ -5784,24 +6317,24 @@ bool GeoProjectionConverter::LLtoTM(const double LatDegree, const double LongDeg
   /* northing */
   t1 = (tmd - tmdo) * tm->tm_scale_factor;
   t2 = sn * s * c * tm->tm_scale_factor/ 2.e0;
-  t3 = sn * s * c3 * tm->tm_scale_factor * (5.e0 - tan2 + 9.e0 * eta 
-                                             + 4.e0 * eta2) /24.e0; 
+  t3 = sn * s * c3 * tm->tm_scale_factor * (5.e0 - tan2 + 9.e0 * eta
+                                             + 4.e0 * eta2) /24.e0;
 
   t4 = sn * s * c5 * tm->tm_scale_factor * (61.e0 - 58.e0 * tan2
                                              + tan4 + 270.e0 * eta - 330.e0 * tan2 * eta + 445.e0 * eta2
-                                             + 324.e0 * eta3 -680.e0 * tan2 * eta2 + 88.e0 * eta4 
+                                             + 324.e0 * eta3 -680.e0 * tan2 * eta2 + 88.e0 * eta4
                                              -600.e0 * tan2 * eta3 - 192.e0 * tan2 * eta4) / 720.e0;
 
-  t5 = sn * s * c7 * tm->tm_scale_factor * (1385.e0 - 3111.e0 * 
+  t5 = sn * s * c7 * tm->tm_scale_factor * (1385.e0 - 3111.e0 *
                                              tan2 + 543.e0 * tan4 - tan6) / 40320.e0;
 
-  TMNorthingMeter = tm->tm_false_northing_meter + t1 + pow(dlam,2.e0) * t2 + pow(dlam,4.e0) * t3 + pow(dlam,6.e0) * t4 + pow(dlam,8.e0) * t5; 
+  TMNorthingMeter = tm->tm_false_northing_meter + t1 + pow(dlam,2.e0) * t2 + pow(dlam,4.e0) * t3 + pow(dlam,6.e0) * t4 + pow(dlam,8.e0) * t5;
 
   /* Easting */
   t6 = sn * c * tm->tm_scale_factor;
   t7 = sn * c3 * tm->tm_scale_factor * (1.e0 - tan2 + eta ) /6.e0;
   t8 = sn * c5 * tm->tm_scale_factor * (5.e0 - 18.e0 * tan2 + tan4
-                                         + 14.e0 * eta - 58.e0 * tan2 * eta + 13.e0 * eta2 + 4.e0 * eta3 
+                                         + 14.e0 * eta - 58.e0 * tan2 * eta + 13.e0 * eta2 + 4.e0 * eta3
                                          - 64.e0 * tan2 * eta2 - 24.e0 * tan2 * eta3 )/ 120.e0;
   t9 = sn * c7 * tm->tm_scale_factor * ( 61.e0 - 479.e0 * tan2
                                           + 179.e0 * tan4 - tan6 ) /5040.e0;
@@ -5810,14 +6343,14 @@ bool GeoProjectionConverter::LLtoTM(const double LatDegree, const double LongDeg
 
   return true;
 }
- 
+
 /*
   * The function TMtoLL() converts Transverse Mercator projection (easting and
-  * northing) coordinates to geodetic (latitude and longitude) coordinates, 
+  * northing) coordinates to geodetic (latitude and longitude) coordinates,
   * according to the current ellipsoid and Transverse Mercator projection
   * parameters.
   *
-  *   TMEastingMeter   : input Easting/X in meters 
+  *   TMEastingMeter   : input Easting/X in meters
   *   TMNorthingMeter  : input Northing/Y in meters
   *   LatDegree        : output Latitude in decimal degrees
   *   LongDegree       : output Longitude in decimal degrees
@@ -5835,7 +6368,6 @@ bool GeoProjectionConverter::TMtoLL(const double TMEastingMeter, const double TM
   double eta4;
   double ftphi;   /* Footpoint latitude                              */
   int    i;       /* Loop iterator                                   */
-  double s;       /* Sine of latitude                                */
   double sn;      /* Radius of curvature in the prime vertical       */
   double sr;      /* Radius of curvature in the meridian             */
   double t;       /* Tangent of latitude                             */
@@ -5856,7 +6388,7 @@ bool GeoProjectionConverter::TMtoLL(const double TMEastingMeter, const double TM
   tmdo = SPHTMD(tm->tm_lat_origin_radian);
 
   /*  Origin  */
-  tmd = tmdo + (TMNorthingMeter - tm->tm_false_northing_meter) / tm->tm_scale_factor; 
+  tmd = tmdo + (TMNorthingMeter - tm->tm_false_northing_meter) / tm->tm_scale_factor;
 
   /* First Estimate */
   sr = SPHSR(0.e0);
@@ -5876,7 +6408,7 @@ bool GeoProjectionConverter::TMtoLL(const double TMEastingMeter, const double TM
   sn = SPHSN(ftphi);
 
   /* Sine Cosine terms */
-  s = sin(ftphi);
+//  s = sin(ftphi);
   c = cos(ftphi);
 
   /* Tangent Value  */
@@ -5895,31 +6427,31 @@ bool GeoProjectionConverter::TMtoLL(const double TMEastingMeter, const double TM
   double Latitude;
   t10 = t / (2.e0 * sr * sn * pow(tm->tm_scale_factor, 2));
   t11 = t * (5.e0  + 3.e0 * tan2 + eta - 4.e0 * pow(eta,2)
-            - 9.e0 * tan2 * eta) / (24.e0 * sr * pow(sn,3) 
+            - 9.e0 * tan2 * eta) / (24.e0 * sr * pow(sn,3)
                                     * pow(tm->tm_scale_factor,4));
   t12 = t * (61.e0 + 90.e0 * tan2 + 46.e0 * eta + 45.E0 * tan4
-            - 252.e0 * tan2 * eta  - 3.e0 * eta2 + 100.e0 
+            - 252.e0 * tan2 * eta  - 3.e0 * eta2 + 100.e0
             * eta3 - 66.e0 * tan2 * eta2 - 90.e0 * tan4
             * eta + 88.e0 * eta4 + 225.e0 * tan4 * eta2
             + 84.e0 * tan2* eta3 - 192.e0 * tan2 * eta4)
        / ( 720.e0 * sr * pow(sn,5) * pow(tm->tm_scale_factor, 6) );
-  t13 = t * ( 1385.e0 + 3633.e0 * tan2 + 4095.e0 * tan4 + 1575.e0 
+  t13 = t * ( 1385.e0 + 3633.e0 * tan2 + 4095.e0 * tan4 + 1575.e0
              * pow(t,6))/ (40320.e0 * sr * pow(sn,7) * pow(tm->tm_scale_factor,8));
   Latitude = ftphi - pow(de,2) * t10 + pow(de,4) * t11 - pow(de,6) * t12 + pow(de,8) * t13;
 
   t14 = 1.e0 / (sn * c * tm->tm_scale_factor);
 
-  t15 = (1.e0 + 2.e0 * tan2 + eta) / (6.e0 * pow(sn,3) * c * 
+  t15 = (1.e0 + 2.e0 * tan2 + eta) / (6.e0 * pow(sn,3) * c *
                                      pow(tm->tm_scale_factor,3));
 
   t16 = (5.e0 + 6.e0 * eta + 28.e0 * tan2 - 3.e0 * eta2
-        + 8.e0 * tan2 * eta + 24.e0 * tan4 - 4.e0 
-        * eta3 + 4.e0 * tan2 * eta2 + 24.e0 
-        * tan2 * eta3) / (120.e0 * pow(sn,5) * c  
+        + 8.e0 * tan2 * eta + 24.e0 * tan4 - 4.e0
+        * eta3 + 4.e0 * tan2 * eta2 + 24.e0
+        * tan2 * eta3) / (120.e0 * pow(sn,5) * c
                           * pow(tm->tm_scale_factor,5));
 
-  t17 = (61.e0 +  662.e0 * tan2 + 1320.e0 * tan4 + 720.e0 
-        * pow(t,6)) / (5040.e0 * pow(sn,7) * c 
+  t17 = (61.e0 +  662.e0 * tan2 + 1320.e0 * tan4 + 720.e0
+        * pow(t,6)) / (5040.e0 * pow(sn,7) * c
                        * pow(tm->tm_scale_factor,7));
 
   /* Difference in Longitude */
@@ -5958,9 +6490,9 @@ bool GeoProjectionConverter::TMtoLL(const double TMEastingMeter, const double TM
   * (ECEF)coordinates to geodetic (latitude and longitude) coordinates on
   * the provided ellipsoid
   *
-  *   ECEFMeterX       : input X coordinate in meters 
-  *   ECEFMeterY       : input Y coordinate in meters 
-  *   ECEFMeterZ       : input Z coordinate in meters 
+  *   ECEFMeterX       : input X coordinate in meters
+  *   ECEFMeterY       : input Y coordinate in meters
+  *   ECEFMeterZ       : input Z coordinate in meters
   *   LatDegree        : output Latitude in decimal degrees
   *   LongDegree       : output Longitude in decimal degrees
   *   ElevationMeter   : output Elevation in meters
@@ -6086,11 +6618,9 @@ bool GeoProjectionConverter::ECEFtoLL(const double ECEFMeterX, const double ECEF
  */
   ElevationMeter = (r - A*t)*cos( LatDegree ) + (z - B)*sin( LatDegree );
 /*
- *   6.0 compute longitude east of Greenwich
+ *   6.0 compute longitude
  */
   zlong = atan2( y, x );
-  if( zlong < 0.0 )
-          zlong= zlong + TWO_PI;
 
   LongDegree = zlong;
 /*
@@ -6110,9 +6640,9 @@ bool GeoProjectionConverter::ECEFtoLL(const double ECEFMeterX, const double ECEF
   *   LatDegree        : input Latitude in decimal degrees
   *   LongDegree       : input Longitude in decimal degrees
   *   ElevationMeter   : input Elevation in meters
-  *   ECEFMeterX       : output X coordinate in meters 
-  *   ECEFMeterY       : output Y coordinate in meters 
-  *   ECEFMeterZ       : output Z coordinate in meters 
+  *   ECEFMeterX       : output X coordinate in meters
+  *   ECEFMeterY       : output Y coordinate in meters
+  *   ECEFMeterZ       : output Z coordinate in meters
   *
   * adapted from code by Craig Larrimore (Craig.Larrimore@noaa.gov) and C. Goad
 */
@@ -6204,10 +6734,10 @@ bool GeoProjectionConverter::LLtoECEF(const double LatDegree, const double LongD
 /*
   * The function AEACtoLL() converts Albers Equal Area Conic projection
   * (easting and northing) coordinates to Geodetic (latitude and longitude)
-  * coordinates, according to the current ellipsoid and Albers Equal Area 
+  * coordinates, according to the current ellipsoid and Albers Equal Area
   * Conic projection parameters.
   *
-  *   AEACEastingMeter  : input Easting/X in meters 
+  *   AEACEastingMeter  : input Easting/X in meters
   *   AEACNorthingMeter : input Northing/Y in meters
   *   LatDegree         : output Latitude in decimal degrees
   *   LongDegree        : output Longitude in decimal degrees
@@ -6235,7 +6765,7 @@ bool GeoProjectionConverter::AEACtoLL(const double AEACEastingMeter, const doubl
   }
 
   if ((AEACNorthingMeter < (aeac->aeac_false_northing_meter - Albers_Delta_Northing)) || (AEACNorthingMeter > aeac->aeac_false_northing_meter + Albers_Delta_Northing))
-  { 
+  {
     return false; /* Northing out of range */
   }
 
@@ -6304,7 +6834,7 @@ bool GeoProjectionConverter::AEACtoLL(const double AEACEastingMeter, const doubl
     else
       LatDegree = -PI_OVER_2;
   }
-  
+
   LongDegree = aeac->aeac_longitude_of_center_radian + theta / aeac->aeac_n;
 
   if (LongDegree > PI)
@@ -6327,11 +6857,11 @@ bool GeoProjectionConverter::AEACtoLL(const double AEACEastingMeter, const doubl
   * The function LLtoAEAC() converts Geodetic (latitude and longitude)
   * coordinates to Albers Equal Area Conic projection (easting and
   * northing) coordinates, according to the current ellipsoid and
-  * Albers Equal Area Conic projection parameters. 
+  * Albers Equal Area Conic projection parameters.
   *
   *   LatDegree         : input Latitude in decimal degrees
   *   LongDegree        : input Longitude in decimal degrees
-  *   AEACEastingMeter  : output Easting/X in meters 
+  *   AEACEastingMeter  : output Easting/X in meters
   *   AEACNorthingMeter : output Northing/Y in meters
   *
   * adapted from ALBERS code of U.S. Army Topographic Engineering Center
@@ -6387,18 +6917,34 @@ bool GeoProjectionConverter::LLtoAEAC(const double LatDegree, const double LongD
 /*
   * The function HOMtoLL() converts the Hotine Oblique Mercator projection
   * (easting and northing) coordinates to Geodetic (latitude and longitude)
-  * coordinates, according to the current ellipsoid and Oblique Mercator 
+  * coordinates, according to the current ellipsoid and Oblique Mercator
   * projection parameters.
   *
-  *   OMEastingMeter    : input Easting/X in meters 
-  *   OMNorthingMeter   : input Northing/Y in meters
+  *   HOMEastingMeter    : input Easting/X in meters
+  *   HOMNorthingMeter   : input Northing/Y in meters
   *   LatDegree         : output Latitude in decimal degrees
   *   LongDegree        : output Longitude in decimal degrees
   *
-  * adapted from OBLIQUE MERCATOR code of U.S. Army Topographic Engineering Center
+  * Formulas: OGP 373-7-2 Geomatics Guidance Note 7, part 2, July 2012
 */
-bool GeoProjectionConverter::HOMtoLL(const double OMEastingMeter, const double OMNorthingMeter, double& LatDegree, double& LongDegree, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersHOM* om) const
+bool GeoProjectionConverter::HOMtoLL(const double HOMEastingMeter, const double HOMNorthingMeter, double& LatDegree, double& LongDegree, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersHOM* hom) const
 {
+	double v = (HOMEastingMeter - hom->hom_false_easting_meter) * cos(hom->hom_rectified_grid_angle_radian) - (HOMNorthingMeter - hom->hom_false_northing_meter) * sin(hom->hom_rectified_grid_angle_radian);
+	double u = (HOMNorthingMeter - hom->hom_false_northing_meter) * cos(hom->hom_rectified_grid_angle_radian) + (HOMEastingMeter - hom->hom_false_easting_meter) * sin(hom->hom_rectified_grid_angle_radian);
+  double Qp = exp(-hom->hom_B * v/hom->hom_A);
+	double Sp = (Qp - (1.0 / Qp)) / 2.0;
+	double Vp = sin(hom->hom_B * u / hom->hom_A);
+	double Up = (Vp * cos(hom->hom_g0) + Sp * sin(hom->hom_g0)) / (Qp + (1.0 / Qp)) * 2.0;
+	double tp = pow(hom->hom_H / sqrt((1.0 + Up) / (1.0 - Up)), 1.0/hom->hom_B);
+	double x = PI / 2.0 - 2.0 * atan(tp);
+	double e2 = ellipsoid->eccentricity_squared;
+	double e4 = e2 * e2;
+	double e6 = e4 * e2;
+	double e8 = e4 * e4;
+	double LatRadian = x+sin(2*x)*(e2/2+5*e4/24+e6/12+13*e8/360)+sin(4*x)*(7*e4/48+29*e6/240+811*e8/11520)+sin(6*x)*(7*e6/120+81*e8/1120)+sin(8*x)*(4279*e8/161280);
+	double LongRadian = hom->hom_l0 - atan2(Sp * cos(hom->hom_g0) - Vp * sin(hom->hom_g0), cos(hom->hom_B * u / hom->hom_A)) / hom->hom_B;
+	LatDegree = rad2deg * LatRadian;
+	LongDegree = rad2deg * LongRadian;
   return true;
 }
 
@@ -6406,17 +6952,170 @@ bool GeoProjectionConverter::HOMtoLL(const double OMEastingMeter, const double O
   * The function LLtoHOM() converts Geodetic (latitude and longitude)
   * coordinates to the Hotine Oblique Mercator projection (easting and
   * northing) coordinates, according to the current ellipsoid and
-  * Oblique Mercator projection parameters. 
+  * Oblique Mercator projection parameters.
   *
   *   LatDegree         : input Latitude in decimal degrees
   *   LongDegree        : input Longitude in decimal degrees
-  *   OMEastingMeter    : output Easting/X in meters 
-  *   OMNorthingMeter   : output Northing/Y in meters
+  *   HOMEastingMeter    : output Easting/X in meters
+  *   HOMNorthingMeter   : output Northing/Y in meters
   *
-  * adapted from OBLIQUE MERCATOR code of U.S. Army Topographic Engineering Center
+  * Formulas: OGP 373-7-2 Geomatics Guidance Note 7, part 2, July 2012
 */
-bool GeoProjectionConverter::LLtoHOM(const double LatDegree, const double LongDegree, double &OMEastingMeter, double &OMNorthingMeter, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersHOM* om) const
+bool GeoProjectionConverter::LLtoHOM(const double LatDegree, const double LongDegree, double &OMEastingMeter, double &OMNorthingMeter, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersHOM* hom) const
 {
+  double lat = LatDegree * deg2rad;
+  double lon = LongDegree * deg2rad;
+
+/*
+  double e = ellipsoid->eccentricity;
+  double esq = ellipsoid->eccentricity_squared;
+  double latc = hom->hom_latitude_of_center_radian;
+  double a = ellipsoid->equatorial_radius;
+  double kc = hom->hom_scale_factor;
+  double alphac = hom->hom_azimuth_radian;
+  double lonc = hom->hom_longitude_of_center_radian;
+  double gammac = hom->hom_rectified_grid_angle_radian;
+  double FE = hom->hom_false_easting_meter;
+  double FN = hom->hom_false_northing_meter;
+
+  // constants for the projection
+
+  double B = sqrt(1.0 + (esq * pow(cos(latc),4) / (1 - esq )));
+  double A = a * B * kc * sqrt(1.0 - esq) / ( 1.0 - esq * pow(sin(latc),2));
+  double to = tan(PI/4.0 - (latc/2)) / pow(((1.0 - e*sin(latc)) / (1.0 + e*sin(latc))),e/2);
+  double D = B * sqrt(1.0 - esq) / (cos(latc) * sqrt( 1 - esq * pow(sin(latc),2)));
+  double D2;
+  if (D < 1) 
+    D2 = 1;
+  else
+    D2 = D*D; 
+  double F;
+  if (latc < 0.0)
+    F = D - sqrt(D2 - 1.0);
+  else
+    F = D + sqrt(D2 - 1.0);
+  double H = F*pow(to,B);
+  double G = (F - (1.0/F)) / 2;
+  double gammao = asin(sin(alphac) / D);
+  double lonO = lonc - (asin(G*tan(gammao))) / B;
+
+  // forward: compute (E,N) from a given (lat,lon) :
+
+  double t = tan(PI/4 - lat/2) / pow((1.0 - e * sin(lat)) / (1 + e * sin(lat)),e/2);
+  double Q = H / pow(t,B);
+  double S = (Q - 1.0 / Q) / 2;
+  double T = (Q + 1.0 / Q) / 2;
+  double V = sin(B * (lon - lonO));
+  double U = (-V * cos(gammao) + S * sin(gammao)) / T;
+  double v = A * log((1.0 - U) / (1.0 + U)) / (2 * B);
+  double u = A * atan((S * cos(gammao) + V * sin(gammao)) / cos(B * (lon - lonO))) / B;
+  OMEastingMeter = v * cos(gammac) + u * sin(gammac) + FE;
+  OMNorthingMeter = u * cos(gammac) - v * sin(gammac) + FN;
+*/
+
+  double t = tan(PI/4 - lat/2) / pow((1.0 - ellipsoid->eccentricity * sin(lat)) / (1 + ellipsoid->eccentricity * sin(lat)), ellipsoid->eccentricity/2);
+  double Q = hom->hom_H / pow(t,hom->hom_B);
+  double S = (Q - 1.0 / Q) / 2;
+  double T = (Q + 1.0 / Q) / 2;
+  double V = sin(hom->hom_B * (lon - hom->hom_l0));
+  double U = (-V * cos(hom->hom_g0) + S * sin(hom->hom_g0)) / T;
+  double v = hom->hom_A * log((1.0 - U) / (1.0 + U)) / (2 * hom->hom_B);
+  double u = hom->hom_A * atan((S * cos(hom->hom_g0) + V * sin(hom->hom_g0)) / cos(hom->hom_B * (lon - hom->hom_l0))) / hom->hom_B;
+  OMEastingMeter = v * cos(hom->hom_rectified_grid_angle_radian) + u * sin(hom->hom_rectified_grid_angle_radian) + hom->hom_false_easting_meter;
+  OMNorthingMeter = u * cos(hom->hom_rectified_grid_angle_radian) - v * sin(hom->hom_rectified_grid_angle_radian) + hom->hom_false_northing_meter;
+  return true;
+}
+
+/*
+  * The function OStoLL() converts the Oblique Stereographic projection
+  * (easting and northing) coordinates to Geodetic (latitude and longitude)
+  * coordinates, according to the current ellipsoid and Oblique Stereographic
+  * projection parameters.
+  *
+  *   OSEastingMeter    : input Easting/X in meters
+  *   OSNorthingMeter   : input Northing/Y in meters
+  *   LatDegree         : output Latitude in decimal degrees
+  *   LongDegree        : output Longitude in decimal degrees
+  *
+  * formulas from "Oblique Stereographic Alternative" by Gerald Evenden and Rueben Schulz
+*/
+bool GeoProjectionConverter::OStoLL(const double OSEastingMeter, const double OSNorthingMeter, double& LatDegree,  double& LongDegree, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersOS* os) const
+{
+  double x = (OSEastingMeter - os->os_false_easting_meter) / os->os_gf;
+  double y = (OSNorthingMeter - os->os_false_northing_meter) / os->os_gf;
+
+  double rho = hypot(x, y);
+  if (fabs(rho) < 1.0e-6)
+  {
+    x = 0.0;
+    y = os->os_phic0;
+  }
+  else
+  {
+    double ce = 2.0 * atan2(rho, os->os_R2);
+    double sinc = sin(ce);
+    double cosc = cos(ce);
+    x = atan2(x * sinc, rho * (os->os_cosc0 * cosc) - (y * os->os_sinc0 * sinc));
+    y = (cosc * os->os_sinc0) + (y * sinc * os->os_cosc0 / rho);
+    if (fabs(y) >= 1.0)
+    {
+      y = (y < 0.0) ? -PI/2.0 : PI/2.0;
+    }
+    else
+    {
+      y = asin(y);
+    }
+  }
+  x /= os->os_C;
+  double num = pow(tan(0.5 * y + PI/4)/os->os_K, 1.0/os->os_C);
+  for (int i=15;;)
+  {
+    double phi = 2.0 * atan(num * srat(ellipsoid->eccentricity * sin(y), -0.5 * ellipsoid->eccentricity)) - PI/2;
+    if (fabs(phi - y) < 1.0e-14)
+    {
+      break;
+    }
+    y = phi;
+    if (--i < 0)
+    {
+      return false;
+    }
+  }
+
+  LatDegree = rad2deg*y;
+  LongDegree = rad2deg*(x + os->os_long_meridian_radian);
+  return true;
+}
+
+/*
+  * The function LLtoOS() converts Geodetic (latitude and longitude)
+  * coordinates to the Oblique Stereographic projection (easting and
+  * northing) coordinates, according to the current ellipsoid and
+  * Oblique Stereographic projection parameters.
+  *
+  *   LatDegree         : input Latitude in decimal degrees
+  *   LongDegree        : input Longitude in decimal degrees
+  *   OSEastingMeter    : output Easting/X in meters
+  *   OSNorthingMeter   : output Northing/Y in meters
+  *
+  * formulas from "Oblique Stereographic Alternative" by Gerald Evenden and Rueben Schulz
+*/
+bool GeoProjectionConverter::LLtoOS(const double LatDegree, const double LongDegree, double& OSEastingMeter,  double& OSNorthingMeter, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersOS* os) const
+{
+  double y = LatDegree*deg2rad;
+  double x = (LongDegree - os->os_long_meridian_degree)*deg2rad;
+
+  y = 2.0 * atan(os->os_K * pow(tan(0.5 * y + PI/4), os->os_C) * srat(ellipsoid->eccentricity * sin(y), os->os_ratexp)) - PI/2;
+  x *= os->os_C;
+  double sinc = sin(y);
+  double cosc = cos(y);
+  double cosl = cos(x);
+  double k = os->os_R2 / (1.0 + os->os_sinc0 * sinc + os->os_cosc0 * cosc * cosl);
+  x = k * cosc * sin(x);
+  y = k * (os->os_cosc0 * sinc - os->os_sinc0 * cosc * cosl);
+
+  OSEastingMeter = x * os->os_gf + os->os_false_easting_meter;
+  OSNorthingMeter = y * os->os_gf + os->os_false_northing_meter;
   return true;
 }
 
@@ -6435,6 +7134,7 @@ GeoProjectionConverter::GeoProjectionConverter()
   ellipsoid = new GeoProjectionEllipsoid();
   set_gcs(GEO_GCS_WGS84);
   vertical_geokey = 0;
+  vertical_geoid = 0;
 
   coordinate_units_set[0] = false;
   coordinate_units_set[1] = false;
@@ -6444,7 +7144,7 @@ GeoProjectionConverter::GeoProjectionConverter()
   elevation_units_set[1] = false;
   elevation2meter = 1.0;
   meter2elevation = 1.0;
- 
+
   target_precision = 0;
   target_elevation_precision = 0;
 
@@ -6454,6 +7154,7 @@ GeoProjectionConverter::GeoProjectionConverter()
 GeoProjectionConverter::~GeoProjectionConverter()
 {
   if (argv_zero) free(argv_zero);
+  if (geo_keys) delete [] geo_keys;
   delete ellipsoid;
   if (source_projection) delete source_projection;
   if (target_projection) delete target_projection;
@@ -6463,9 +7164,10 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
 {
   int i;
   char tmp[256];
+  bool verbose = false;
 
   if (argv_zero) free(argv_zero);
-  argv_zero = strdup(argv[0]);
+  argv_zero = LASCopyString(argv[0]);
 
   for (i = 1; i < argc; i++)
   {
@@ -6477,6 +7179,10 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
     {
       return true;
     }
+    else if (strcmp(argv[i],"-v") == 0 || strcmp(argv[i],"-verbose") == 0)
+    {
+      verbose = true;
+    }
     else if (strcmp(argv[i],"-ellipsoid") == 0)
     {
       if ((i+1) >= argc)
@@ -6487,7 +7193,7 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
       int ellipsoid_id = atoi(argv[i+1]);
       if (set_reference_ellipsoid(ellipsoid_id, tmp))
       {
-        fprintf(stderr, "using ellipsoid '%s'\n", tmp);
+        if (verbose) fprintf(stderr, "using ellipsoid '%s'\n", tmp);
       }
       else
       {
@@ -6504,50 +7210,128 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
     else if (strcmp(argv[i],"-wgs72") == 0)
     {
       set_gcs(GEO_GCS_WGS72, tmp);
-      fprintf(stderr, "using ellipsoid '%s'\n", tmp);
+      if (verbose) fprintf(stderr, "using ellipsoid '%s'\n", tmp);
       *argv[i]='\0';
     }
     else if (strcmp(argv[i],"-wgs84") == 0)
     {
       set_gcs(GEO_GCS_WGS84, tmp);
-      fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+      if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
       *argv[i]='\0';
     }
     else if (strcmp(argv[i],"-grs80") == 0)
     {
       set_reference_ellipsoid(GEO_ELLIPSOID_GRS1980, tmp);
-      fprintf(stderr, "using ellipsoid '%s'\n", tmp);
+      if (verbose) fprintf(stderr, "using ellipsoid '%s'\n", tmp);
       *argv[i]='\0';
     }
     else if (strcmp(argv[i],"-nad27") == 0)
     {
       set_gcs(GEO_GCS_NAD27, tmp);
-      fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+      if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
       *argv[i]='\0';
     }
-    else if (strcmp(argv[i],"-nad83") == 0)
+    else if (strncmp(argv[i],"-nad83", 6) == 0)
     {
-      set_gcs(GEO_GCS_NAD83, tmp);
-      fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
-      *argv[i]='\0';
+      if (strcmp(argv[i],"-nad83") == 0)
+      {
+        set_gcs(GEO_GCS_NAD83, tmp);
+        if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-nad83_2011") == 0)
+      {
+        set_gcs(GEO_GCS_NAD83_2011, tmp);
+        if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-nad83_harn") == 0)
+      {
+        set_gcs(GEO_GCS_NAD83_HARN, tmp);
+        if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-nad83_csrs") == 0)
+      {
+        set_gcs(GEO_GCS_NAD83_CSRS, tmp);
+        if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-nad83_pa11") == 0)
+      {
+        set_gcs(GEO_GCS_NAD83_PA11, tmp);
+        if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+        *argv[i]='\0';
+      }
+      else
+      {
+        fprintf(stderr,"ERROR: unknown datum '%s'.\n", argv[i]);
+        return false;
+      }
     }
     else if (strcmp(argv[i],"-gda94") == 0)
     {
       set_gcs(GEO_GCS_GDA94, tmp);
-      fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+      if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
       *argv[i]='\0';
     }
     else if (strcmp(argv[i],"-etrs89") == 0)
     {
       set_gcs(GEO_GCS_ETRS89, tmp);
-      fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+      if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
+      *argv[i]='\0';
+    }
+    else if (strcmp(argv[i],"-osgb1936") == 0)
+    {
+      set_gcs(GEO_GCS_OSGB1936, tmp);
+      if (verbose) fprintf(stderr, "using datum '%s' with ellipsoid '%s'\n", tmp, get_ellipsoid_name());
       *argv[i]='\0';
     }
     else if (strncmp(argv[i],"-vertical_", 10) == 0)
     {
-      if (strcmp(argv[i],"-vertical_navd88") == 0)
+      if (strncmp(argv[i],"-vertical_navd88", 16) == 0)
       {
         vertical_geokey = GEO_VERTICAL_NAVD88;
+        if (strcmp(argv[i] + 16,"") == 0)
+        {
+          vertical_geoid = 0; // none
+        }
+        else if (strcmp(argv[i] + 16,"_geoid12b") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID12B;
+        }
+        else if (strcmp(argv[i] + 16,"_geoid12a") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID12A;
+        }
+        else if (strcmp(argv[i] + 16,"_geoid12") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID12;
+        }
+        else if (strcmp(argv[i] + 16,"_geoid09") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID09;
+        }
+        else if (strcmp(argv[i] + 16,"_geoid06") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID06;
+        }
+        else if (strcmp(argv[i] + 16,"_geoid03") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID03;
+        }
+        else if (strcmp(argv[i] + 16,"_geoid99") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID99;
+        }
+        else if (strcmp(argv[i] + 16,"_geoid96") == 0)
+        {
+          vertical_geoid = GEO_VERTICAL_NAVD88_GEOID96;
+        }
+        else
+        {
+          fprintf(stderr, "WARNING: unknown specialization of NAVD88 '%s'\n", argv[i] + 16);
+        }
         *argv[i]='\0';
       }
       else if (strcmp(argv[i],"-vertical_wgs84") == 0)
@@ -6565,6 +7349,11 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
         vertical_geokey = GEO_VERTICAL_CGVD2013;
         *argv[i]='\0';
       }
+      else if (strcmp(argv[i],"-vertical_evrf2007") == 0)
+      {
+        vertical_geokey = GEO_VERTICAL_EVRF2007;
+        *argv[i]='\0';
+      }
       else if (strcmp(argv[i],"-vertical_cgvd28") == 0)
       {
         vertical_geokey = GEO_VERTICAL_CGVD28;
@@ -6575,26 +7364,80 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
         vertical_geokey = GEO_VERTICAL_DVR90;
         *argv[i]='\0';
       }
+      else if (strcmp(argv[i],"-vertical_nn2000") == 0)
+      {
+        vertical_geokey = GEO_VERTICAL_NN2000;
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-vertical_nn54") == 0)
+      {
+        vertical_geokey = GEO_VERTICAL_NN54;
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-vertical_dhhn92") == 0)
+      {
+        vertical_geokey = GEO_VERTICAL_DHHN92;
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-vertical_dhhn2016") == 0)
+      {
+        vertical_geokey = GEO_VERTICAL_DHHN2016;
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-vertical_nzvd2016") == 0)
+      {
+        vertical_geokey = GEO_VERTICAL_NZVD2016;
+        *argv[i]='\0';
+      }
+      else if (strcmp(argv[i],"-vertical_epsg") == 0)
+      {
+        if ((i+1) >= argc)
+        {
+          fprintf(stderr,"ERROR: '%s' needs 1 argument: EPSG code\n", argv[i]);
+          return false;
+        }
+        unsigned int code = 0;
+        if (sscanf(argv[i+1], "%u", &code) != 1)
+        {
+          fprintf(stderr,"ERROR: '%s' needs 1 argument: EPSG code but '%s' is not a valid code\n", argv[i], argv[i+1]);
+          return false;
+        }
+        if (code > 32767)
+        {
+          fprintf(stderr,"ERROR: '%s' needs 1 argument: EPSG code but %u is not a valid code\n", argv[i], code);
+          return false;
+        }
+        if (!set_VerticalCSTypeGeoKey(code))
+        {
+          fprintf(stderr, "ERROR: unknown vertical EPSG code in '%s %s'.\n", argv[i], argv[i+1]);
+          return false;
+        }
+        else
+        {
+          if (verbose) fprintf(stderr, "using vertical EPSG code %d\n", code);
+        }
+        *argv[i]='\0'; *argv[i+1]='\0'; i+=1;
+      }
     }
     else if (strcmp(argv[i],"-latlong") == 0 || strcmp(argv[i],"-target_latlong") == 0)
     {
       bool source = (strcmp(argv[i],"-latlong") == 0);
       set_latlong_projection(tmp, source);
-      fprintf(stderr, "using %s '%s'\n", (source ? "projection" : "target projection"), tmp);
+      if (verbose) fprintf(stderr, "using %s '%s'\n", (source ? "projection" : "target projection"), tmp);
       *argv[i]='\0';
     }
     else if (strcmp(argv[i],"-longlat") == 0 || strcmp(argv[i],"-target_longlat") == 0)
     {
       bool source = (strcmp(argv[i],"-longlat") == 0);
       set_longlat_projection(tmp, source);
-      fprintf(stderr, "using %s '%s'\n", (source ? "projection" : "target projection"), tmp);
+      if (verbose) fprintf(stderr, "using %s '%s'\n", (source ? "projection" : "target projection"), tmp);
       *argv[i]='\0';
     }
     else if (strcmp(argv[i],"-ecef") == 0 || strcmp(argv[i],"-target_ecef") == 0)
     {
       bool source = (strcmp(argv[i],"-ecef") == 0);
       set_ecef_projection(tmp, source);
-      fprintf(stderr, "using %s '%s'\n", (source ? "projection" : "target projection"), tmp);
+      if (verbose) fprintf(stderr, "using %s '%s'\n", (source ? "projection" : "target projection"), tmp);
       *argv[i]='\0';
     }
     else if (strcmp(argv[i],"-utm") == 0 || strcmp(argv[i],"-target_utm") == 0)
@@ -6603,7 +7446,7 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
       if (!source && (strcmp(argv[i+1],"auto") == 0))
       {
         set_target_utm_projection(tmp);
-        fprintf(stderr, "using target projection UTM '%s'\n", tmp);
+        if (verbose) fprintf(stderr, "using target projection UTM '%s'\n", tmp);
       }
       else
       {
@@ -6629,7 +7472,7 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
         }
         if (set_utm_projection(argv[i+1], tmp, source))
         {
-          fprintf(stderr, "using %s UTM '%s'\n", (source ? "projection" : "target projection"), tmp);
+          if (verbose) fprintf(stderr, "using %s UTM '%s'\n", (source ? "projection" : "target projection"), tmp);
         }
         else
         {
@@ -6642,11 +7485,25 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
     else if (strcmp(argv[i],"-epsg") == 0 || strcmp(argv[i],"-target_epsg") == 0)
     {
       bool source = (strcmp(argv[i],"-epsg") == 0);
-      short value = (short)atoi(argv[i+1]);
-      if (!set_epsg_code(value, 0, source))
+      unsigned int code = 0;
+      if (sscanf(argv[i+1], "%u", &code) != 1)
+      {
+        fprintf(stderr,"ERROR: '%s' needs 1 argument: EPSG code but '%s' is not a valid code\n", argv[i], argv[i+1]);
+        return false;
+      }
+      if (code > 32767)
+      {
+        fprintf(stderr,"ERROR: '%s' needs 1 argument: EPSG code but %u is not a valid code\n", argv[i], code);
+        return false;
+      }
+      if (!set_epsg_code((short)code, 0, source))
       {
         fprintf(stderr, "ERROR: unknown EPSG code in '%s %s'.\n", argv[i], argv[i+1]);
         return false;
+      }
+      else
+      {
+        if (verbose) fprintf(stderr, "using %s EPSG code %d\n", (source ? "projection" : "target projection"), code);
       }
       *argv[i]='\0'; *argv[i+1]='\0'; i+=1;
     }
@@ -6686,7 +7543,7 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
       double firstStdParallelDeg = atof(argv[i+6]);
       double secondStdParallelDeg = atof(argv[i+7]);
       set_lambert_conformal_conic_projection(falseEasting, falseNorthing, latOfOriginDeg, longOfOriginDeg, firstStdParallelDeg, secondStdParallelDeg, tmp, source);
-      fprintf(stderr, "using LCC %s '%s'\n", (source ? "projection" : "target projection"), tmp);
+      if (verbose) fprintf(stderr, "using LCC %s '%s'\n", (source ? "projection" : "target projection"), tmp);
       *argv[i]='\0'; *argv[i+1]='\0';  *argv[i+2]='\0';  *argv[i+3]='\0';  *argv[i+4]='\0';  *argv[i+5]='\0';  *argv[i+6]='\0';  *argv[i+7]='\0'; i+=7;
     }
     else if (strcmp(argv[i],"-sp83") == 0 || strcmp(argv[i],"-target_sp83") == 0)
@@ -6694,11 +7551,11 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
       bool source = (strcmp(argv[i],"-sp83") == 0);
       if (set_state_plane_nad83_lcc(argv[i+1], tmp, source))
       {
-        fprintf(stderr, "using %s '%s' (NAD83 LCC) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
+        if (verbose) fprintf(stderr, "using %s '%s' (NAD83 LCC) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
       }
       else if (set_state_plane_nad83_tm(argv[i+1], tmp, source))
       {
-        fprintf(stderr, "using %s '%s' (NAD83 TM) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
+        if (verbose) fprintf(stderr, "using %s '%s' (NAD83 TM) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
       }
       else
       {
@@ -6714,11 +7571,11 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
       bool source = (strcmp(argv[i],"-sp27") == 0);
       if (set_state_plane_nad27_lcc(argv[i+1], tmp, source))
       {
-        fprintf(stderr, "using %s '%s' (NAD27 LCC) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
+        if (verbose) fprintf(stderr, "using %s '%s' (NAD27 LCC) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
       }
       else if (set_state_plane_nad27_tm(argv[i+1], tmp, source))
       {
-        fprintf(stderr, "using %s '%s' (NAD27 TM) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
+        if (verbose) fprintf(stderr, "using %s '%s' (NAD27 TM) '%s'\n", (source ? "state plane" : "target state plane"), argv[i+1], tmp);
       }
       else
       {
@@ -6764,7 +7621,7 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
       double longMeridianDeg; sscanf(argv[i+5], "%lf", &longMeridianDeg);
       double scaleFactor; sscanf(argv[i+6], "%lf", &scaleFactor);
       set_transverse_mercator_projection(falseEasting, falseNorthing, latOriginDeg, longMeridianDeg, scaleFactor, tmp, source);
-      fprintf(stderr, "using TM %s '%s'\n", (source ? "projection" : "target projection"), tmp);
+      if (verbose) fprintf(stderr, "using TM %s '%s'\n", (source ? "projection" : "target projection"), tmp);
       *argv[i]='\0'; *argv[i+1]='\0';  *argv[i+2]='\0';  *argv[i+3]='\0';  *argv[i+4]='\0';  *argv[i+5]='\0';  *argv[i+6]='\0'; i+=6;
     }
     else if (strcmp(argv[i],"-aeac") == 0 || strcmp(argv[i],"-target_aeac") == 0)
@@ -6803,7 +7660,7 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
       double firstStdParallelDeg = atof(argv[i+6]);
       double secondStdParallelDeg = atof(argv[i+7]);
       set_albers_equal_area_conic_projection(falseEasting, falseNorthing, latOfCenterDeg, longOfCenterDeg, firstStdParallelDeg, secondStdParallelDeg, tmp, source);
-      fprintf(stderr, "using AEAC %s '%s'\n", (source ? "projection" : "target projection"), tmp);
+      if (verbose) fprintf(stderr, "using AEAC %s '%s'\n", (source ? "projection" : "target projection"), tmp);
       *argv[i]='\0'; *argv[i+1]='\0';  *argv[i+2]='\0';  *argv[i+3]='\0';  *argv[i+4]='\0';  *argv[i+5]='\0';  *argv[i+6]='\0';  *argv[i+7]='\0'; i+=7;
     }
     else if (strcmp(argv[i],"-surveyfeet") == 0 || strcmp(argv[i],"-survey_feet") == 0)
@@ -6883,48 +7740,114 @@ bool GeoProjectionConverter::parse(int argc, char* argv[])
 int GeoProjectionConverter::unparse(char* string) const
 {
   int n = 0;
-  bool have_epsg = false;
   if (source_projection != 0)
   {
     if (source_projection->geokey != 0)
     {
+      // EPSG codes are simplest ...
+
       n += sprintf(&string[n], "-epsg %u ", source_projection->geokey);
-      have_epsg = true;
     }
-    else if (source_projection->type == GEO_PROJECTION_LAT_LONG)
+    else
     {
-      n += sprintf(&string[n], "-latlong ");
-    }
-    else if (source_projection->type == GEO_PROJECTION_LONG_LAT)
-    {
-      n += sprintf(&string[n], "-longlat ");
-    }
-    else if (source_projection->type == GEO_PROJECTION_ECEF)
-    {
-      n += sprintf(&string[n], "-ecef ");
-    }
-    else if (source_projection->type == GEO_PROJECTION_UTM)
-    {
-      GeoProjectionParametersUTM* utm = (GeoProjectionParametersUTM*)source_projection;
-      n += sprintf(&string[n], "-utm %d%c ", utm->utm_zone_number, (utm->utm_northern_hemisphere ? 'U' : 'L'));
-    }
-    else if (source_projection->type == GEO_PROJECTION_LCC)
-    {
-      GeoProjectionParametersLCC* lcc = (GeoProjectionParametersLCC*)source_projection;
-      n += sprintf(&string[n], "-lcc %.10g %.10g m %.10g %.10g %.10g %.10g ", lcc->lcc_false_easting_meter, lcc->lcc_false_northing_meter, lcc->lcc_lat_origin_degree, lcc->lcc_long_meridian_degree, lcc->lcc_first_std_parallel_degree, lcc->lcc_second_std_parallel_degree);
-    }
-    else if (source_projection->type == GEO_PROJECTION_TM)
-    {
-      GeoProjectionParametersTM* tm = (GeoProjectionParametersTM*)source_projection;
-      n += sprintf(&string[n], "-tm %.10g %.10g m %.10g %.10g %.10g ", tm->tm_false_easting_meter, tm->tm_false_northing_meter, tm->tm_lat_origin_degree, tm->tm_long_meridian_degree, tm->tm_scale_factor);
+      // ... or more complex as a composite of switches
+
+      if (gcs_code)
+      {
+        if (gcs_code == GEO_GCS_NAD83)
+        {
+          n += sprintf(&string[n], "-nad83 ");
+        }
+        else if (gcs_code == GEO_ELLIPSOID_GRS1980)
+        {
+          n += sprintf(&string[n], "-grs80 ");
+        }
+        else if (gcs_code == GEO_GCS_WGS84)
+        {
+          n += sprintf(&string[n], "-wgs84 ");
+        }
+        else if (gcs_code == GEO_GCS_NAD83_2011)
+        {
+          n += sprintf(&string[n], "-nad83_2011 ");
+        }
+        else if (gcs_code == GEO_GCS_NAD83_HARN)
+        {
+          n += sprintf(&string[n], "-nad83_harn ");
+        }
+        else if (gcs_code == GEO_GCS_NAD83_CSRS)
+        {
+          n += sprintf(&string[n], "-nad83_csrs ");
+        }
+        else if (gcs_code == GEO_GCS_NAD83_PA11)
+        {
+          n += sprintf(&string[n], "-nad83_pa11 ");
+        }
+        else if (gcs_code == GEO_GCS_ETRS89)
+        {
+          n += sprintf(&string[n], "-etrs89 ");
+        }
+        else if (gcs_code == GEO_GCS_GDA94)
+        {
+          n += sprintf(&string[n], "-gda94 ");
+        }
+        else if (gcs_code == GEO_GCS_WGS72)
+        {
+          n += sprintf(&string[n], "-wgs72 ");
+        }
+        else if (gcs_code == GEO_GCS_NAD27)
+        {
+          n += sprintf(&string[n], "-nad27 ");
+        }
+        else if (gcs_code == GEO_GCS_OSGB1936)
+        {
+          n += sprintf(&string[n], "-osgb1936 ");
+        }
+        else if (ellipsoid)
+        {
+          n += sprintf(&string[n], "-ellipsoid %d ", ellipsoid->id);
+        }
+      }
+      else if (ellipsoid)
+      {
+        n += sprintf(&string[n], "-ellipsoid %d ", ellipsoid->id);
+      }
+
+      if (source_projection->type == GEO_PROJECTION_LAT_LONG)
+      {
+        n += sprintf(&string[n], "-latlong ");
+      }
+      else if (source_projection->type == GEO_PROJECTION_LONG_LAT)
+      {
+        n += sprintf(&string[n], "-longlat ");
+      }
+      else if (source_projection->type == GEO_PROJECTION_ECEF)
+      {
+        n += sprintf(&string[n], "-ecef ");
+      }
+      else if (source_projection->type == GEO_PROJECTION_UTM)
+      {
+        GeoProjectionParametersUTM* utm = (GeoProjectionParametersUTM*)source_projection;
+        n += sprintf(&string[n], "-utm %d%c ", utm->utm_zone_number, (utm->utm_northern_hemisphere ? 'n' : 's'));
+      }
+      else if (source_projection->type == GEO_PROJECTION_LCC)
+      {
+        GeoProjectionParametersLCC* lcc = (GeoProjectionParametersLCC*)source_projection;
+        n += sprintf(&string[n], "-lcc %lf %lf m %lf %lf %lf %lf ", lcc->lcc_false_easting_meter, lcc->lcc_false_northing_meter, lcc->lcc_lat_origin_degree, lcc->lcc_long_meridian_degree, lcc->lcc_first_std_parallel_degree, lcc->lcc_second_std_parallel_degree);
+      }
+      else if (source_projection->type == GEO_PROJECTION_TM)
+      {
+        GeoProjectionParametersTM* tm = (GeoProjectionParametersTM*)source_projection;
+        n += sprintf(&string[n], "-tm %lf %lf m %lf %lf %lf ", tm->tm_false_easting_meter, tm->tm_false_northing_meter, tm->tm_lat_origin_degree, tm->tm_long_meridian_degree, tm->tm_scale_factor);
+      }
+      else if (source_projection->type == GEO_PROJECTION_AEAC)
+      {
+        GeoProjectionParametersAEAC* aeac = (GeoProjectionParametersAEAC*)source_projection;
+        n += sprintf(&string[n], "-aeac %lf %lf m %lf %lf %lf %lf ", aeac->aeac_false_easting_meter, aeac->aeac_false_northing_meter, aeac->aeac_latitude_of_center_degree, aeac->aeac_longitude_of_center_degree, aeac->aeac_first_std_parallel_degree, aeac->aeac_second_std_parallel_degree);
+      }
     }
   }
-  if (!have_epsg)
+  if (has_coordinate_units(true))
   {
-    if (ellipsoid)
-    {
-      n += sprintf(&string[n], "-ellipsoid %d ", ellipsoid->id);
-    }
     if (coordinates2meter != 1.0)
     {
       if (coordinates2meter == 0.3048)
@@ -6937,15 +7860,18 @@ int GeoProjectionConverter::unparse(char* string) const
       }
     }
   }
-  if (elevation2meter != 1.0)
+  if (has_elevation_units(true))
   {
-    if (elevation2meter == 0.3048)
+    if (elevation2meter != 1.0)
     {
-      n += sprintf(&string[n], "-elevation_feet ");
-    }
-    else
-    {
-      n += sprintf(&string[n], "-elevation_surveyfeet ");
+      if (elevation2meter == 0.3048)
+      {
+        n += sprintf(&string[n], "-elevation_feet ");
+      }
+      else
+      {
+        n += sprintf(&string[n], "-elevation_surveyfeet ");
+      }
     }
   }
   if (vertical_geokey)
@@ -6962,6 +7888,10 @@ int GeoProjectionConverter::unparse(char* string) const
     {
       n += sprintf(&string[n], "-vertical_cgvd2013 ");
     }
+    else if (vertical_geokey == GEO_VERTICAL_EVRF2007)
+    {
+      n += sprintf(&string[n], "-vertical_evrf2007 ");
+    }
     else if (vertical_geokey == GEO_VERTICAL_CGVD28)
     {
       n += sprintf(&string[n], "-vertical_cgvd28 ");
@@ -6974,14 +7904,36 @@ int GeoProjectionConverter::unparse(char* string) const
     {
       n += sprintf(&string[n], "-vertical_ngvd29 ");
     }
+    else if (vertical_geokey == GEO_VERTICAL_NN2000)
+    {
+      n += sprintf(&string[n], "-vertical_nn2000 ");
+    }
+    else if (vertical_geokey == GEO_VERTICAL_NN54)
+    {
+      n += sprintf(&string[n], "-vertical_nn54 ");
+    }
+    else if (vertical_geokey == GEO_VERTICAL_DHHN92)
+    {
+      n += sprintf(&string[n], "-vertical_dhhn92 ");
+    }
+    else if (vertical_geokey == GEO_VERTICAL_DHHN2016)
+    {
+      n += sprintf(&string[n], "-vertical_dhhn2016 ");
+    }
+    else if (vertical_geokey == GEO_VERTICAL_NZVD2016)
+    {
+      n += sprintf(&string[n], "-vertical_nzvd2016 ");
+    }
+    else
+    {
+      n += sprintf(&string[n], "-vertical_epsg %d ", vertical_geokey);
+    }
   }
-  have_epsg = false;
   if (target_projection != 0)
   {
     if (target_projection->geokey != 0)
     {
       n += sprintf(&string[n], "-target_epsg %u ", target_projection->geokey);
-      have_epsg = true;
     }
     else if (target_projection->type == GEO_PROJECTION_LAT_LONG)
     {
@@ -7010,26 +7962,28 @@ int GeoProjectionConverter::unparse(char* string) const
     else if (target_projection->type == GEO_PROJECTION_LCC)
     {
       GeoProjectionParametersLCC* lcc = (GeoProjectionParametersLCC*)target_projection;
-      n += sprintf(&string[n], "-target_lcc %g %g m %g %g %g %g ", lcc->lcc_false_easting_meter, lcc->lcc_false_northing_meter, lcc->lcc_lat_origin_degree, lcc->lcc_long_meridian_degree, lcc->lcc_first_std_parallel_degree, lcc->lcc_second_std_parallel_degree);
+      n += sprintf(&string[n], "-target_lcc %lf %lf m %lf %lf %lf %lf ", lcc->lcc_false_easting_meter, lcc->lcc_false_northing_meter, lcc->lcc_lat_origin_degree, lcc->lcc_long_meridian_degree, lcc->lcc_first_std_parallel_degree, lcc->lcc_second_std_parallel_degree);
     }
     else if (target_projection->type == GEO_PROJECTION_TM)
     {
       GeoProjectionParametersTM* tm = (GeoProjectionParametersTM*)target_projection;
-      n += sprintf(&string[n], "-target_tm %g %g m %g %g %g ", tm->tm_false_easting_meter, tm->tm_false_northing_meter, tm->tm_lat_origin_degree, tm->tm_long_meridian_degree, tm->tm_scale_factor);
+      n += sprintf(&string[n], "-target_tm %lf %lf m %lf %lf %lf ", tm->tm_false_easting_meter, tm->tm_false_northing_meter, tm->tm_lat_origin_degree, tm->tm_long_meridian_degree, tm->tm_scale_factor);
+    }
+    else if (target_projection->type == GEO_PROJECTION_AEAC)
+    {
+      GeoProjectionParametersAEAC* aeac = (GeoProjectionParametersAEAC*)target_projection;
+      n += sprintf(&string[n], "-target_aeac %lf %lf m %lf %lf %lf %lf ", aeac->aeac_false_easting_meter, aeac->aeac_false_northing_meter, aeac->aeac_latitude_of_center_degree, aeac->aeac_longitude_of_center_degree, aeac->aeac_first_std_parallel_degree, aeac->aeac_second_std_parallel_degree);
     }
   }
-  if (!have_epsg)
+  if (meter2coordinates != 1.0)
   {
-    if (meter2coordinates != 1.0)
+    if (meter2coordinates == 1.0/0.3048)
     {
-      if (meter2coordinates == 1.0/0.3048)
-      {
-        n += sprintf(&string[n], "-target_feet ");
-      }
-      else
-      {
-        n += sprintf(&string[n], "-target_surveyfeet ");
-      }
+      n += sprintf(&string[n], "-target_feet ");
+    }
+    else
+    {
+      n += sprintf(&string[n], "-target_surveyfeet ");
     }
   }
   if (meter2elevation != 1.0)
@@ -7045,12 +7999,13 @@ int GeoProjectionConverter::unparse(char* string) const
   }
   if (target_precision != 0.0)
   {
-    n += sprintf(&string[n], "-target_precision %g ", target_precision);
+    n += sprintf(&string[n], "-target_precision %lf ", target_precision);
   }
   if (target_elevation_precision != 0.0)
   {
-    n += sprintf(&string[n], "-target_elevation_precision %g ", target_elevation_precision);
+    n += sprintf(&string[n], "-target_elevation_precision %lf ", target_elevation_precision);
   }
+
   return n;
 }
 
@@ -7213,7 +8168,14 @@ bool GeoProjectionConverter::to_lon_lat_ele(const double* point, double& longitu
     case GEO_PROJECTION_AEAC:
       AEACtoLL(coordinates2meter*point[0], coordinates2meter*point[1], latitude, longitude, ellipsoid, (const GeoProjectionParametersAEAC*)source_projection);
       break;
+    case GEO_PROJECTION_OS:
+      OStoLL(coordinates2meter*point[0], coordinates2meter*point[1], latitude, longitude, ellipsoid, (const GeoProjectionParametersOS*)source_projection);
+      break;
+    case GEO_PROJECTION_HOM:
+      HOMtoLL(coordinates2meter*point[0], coordinates2meter*point[1], latitude, longitude, ellipsoid, (const GeoProjectionParametersHOM*)source_projection);
+      break;
     }
+
     elevation_in_meter = elevation2meter*point[2] + elevation_offset_in_meter;
     return true;
   }
@@ -7260,6 +8222,12 @@ bool GeoProjectionConverter::to_target(const double* point,  double &x, double &
     case GEO_PROJECTION_AEAC:
       AEACtoLL(coordinates2meter*point[0], coordinates2meter*point[1], latitude, longitude, ellipsoid, (const GeoProjectionParametersAEAC*)source_projection);
       break;
+    case GEO_PROJECTION_OS:
+      OStoLL(coordinates2meter*point[0], coordinates2meter*point[1], latitude, longitude, ellipsoid, (const GeoProjectionParametersOS*)source_projection);
+      break;
+    case GEO_PROJECTION_HOM:
+      HOMtoLL(coordinates2meter*point[0], coordinates2meter*point[1], latitude, longitude, ellipsoid, (const GeoProjectionParametersHOM*)source_projection);
+      break;
     }
 
     switch (target_projection->type)
@@ -7296,6 +8264,16 @@ bool GeoProjectionConverter::to_target(const double* point,  double &x, double &
       break;
     case GEO_PROJECTION_AEAC:
       LLtoAEAC(latitude, longitude, x, y, ellipsoid, (const GeoProjectionParametersAEAC*)target_projection);
+      x = meter2coordinates * x;
+      y = meter2coordinates * y;
+      break;
+    case GEO_PROJECTION_OS:
+      LLtoOS(latitude, longitude, x, y, ellipsoid, (const GeoProjectionParametersOS*)target_projection);
+      x = meter2coordinates * x;
+      y = meter2coordinates * y;
+      break;
+    case GEO_PROJECTION_HOM:
+      LLtoHOM(latitude, longitude, x, y, ellipsoid, (const GeoProjectionParametersHOM*)target_projection);
       x = meter2coordinates * x;
       y = meter2coordinates * y;
       break;
@@ -7345,7 +8323,7 @@ bool GeoProjectionConverter::get_img_datum_parameters(char** psDatumame, int* pr
   {
     if (ellipsoid->id == GEO_ELLIPSOID_WGS84)
     {
-      *psDatumame = strdup("NAD27");
+      *psDatumame = LASCopyString("NAD27");
 
         if (utm->utm_northern_hemisphere)
         {
@@ -7498,7 +8476,7 @@ bool GeoProjectionConverter::get_img_projection_parameters(char** proName, int* 
     {
       *proNumber = 0;
     }
-    else if (projection->type == 
+    else if (projection->type ==
   }
   else if ()
   {
@@ -7508,15 +8486,15 @@ bool GeoProjectionConverter::get_img_projection_parameters(char** proName, int* 
 
 bool GeoProjectionConverter::get_dtm_projection_parameters(short* horizontal_units, short* vertical_units, short* coordinate_system, short* coordinate_zone, short* horizontal_datum, short* vertical_datum, bool source)
 {
-  if (get_ProjLinearUnitsGeoKey() == 9001)
+  if (get_ProjLinearUnitsGeoKey(source) == 9001)
   {
     *horizontal_units = 1;
   }
-  else if (get_ProjLinearUnitsGeoKey() == 9002)
+  else if (get_ProjLinearUnitsGeoKey(source) == 9002)
   {
     *horizontal_units = 0;
   }
-  else if (get_ProjLinearUnitsGeoKey() == 9003)
+  else if (get_ProjLinearUnitsGeoKey(source) == 9003)
   {
     *horizontal_units = 0;
   }
@@ -7525,15 +8503,15 @@ bool GeoProjectionConverter::get_dtm_projection_parameters(short* horizontal_uni
     *horizontal_units = 2;
   }
 
-  if (get_VerticalUnitsGeoKey() == 9001)
+  if (get_VerticalUnitsGeoKey(source) == 9001)
   {
     *vertical_units = 1;
   }
-  else if (get_VerticalUnitsGeoKey() == 9002)
+  else if (get_VerticalUnitsGeoKey(source) == 9002)
   {
     *vertical_units = 0;
   }
-  else if (get_VerticalUnitsGeoKey() == 9003)
+  else if (get_VerticalUnitsGeoKey(source) == 9003)
   {
     *vertical_units = 0;
   }
@@ -7951,7 +8929,7 @@ bool GeoProjectionConverter::get_dtm_projection_parameters(short* horizontal_uni
   {
     *horizontal_datum = 1;
   }
-  else if ((gcs_code == GEO_GCS_NAD83) || (gcs_code == GEO_GCS_NAD83_HARN) || (gcs_code == GEO_GCS_NAD83_CSRS) || (gcs_code == GEO_GCS_NAD83_2011) || (gcs_code == GEO_GCS_NAD83_NSRS2007))
+  else if ((gcs_code == GEO_GCS_NAD83) || (gcs_code == GEO_GCS_NAD83_HARN) || (gcs_code == GEO_GCS_NAD83_CSRS) || (gcs_code == GEO_GCS_NAD83_PA11) || (gcs_code == GEO_GCS_NAD83_2011) || (gcs_code == GEO_GCS_NAD83_NSRS2007))
   {
     *horizontal_datum = 2;
   }
@@ -8000,11 +8978,11 @@ bool GeoProjectionConverter::set_dtm_projection_parameters(short horizontal_unit
 {
   if (horizontal_units == 1)
   {
-    set_ProjLinearUnitsGeoKey(9001);
+    set_ProjLinearUnitsGeoKey(9001, source);
   }
   else if (horizontal_units == 0)
   {
-    set_ProjLinearUnitsGeoKey(9002);
+    set_ProjLinearUnitsGeoKey(9002, source);
   }
 
   if (vertical_units == 1)
@@ -8053,917 +9031,3 @@ bool GeoProjectionConverter::set_dtm_projection_parameters(short horizontal_unit
 
   return true;
 }
-
-#ifdef NOT
-
- /***************************************************************************/
- /* RSC IDENTIFIER: OBLIQUE MERCATOR
-  *
-  * ABSTRACT
-  *
-  *    This component provides conversions between Geodetic coordinates
-  *    (latitude and longitude in radians) and Oblique Mercator
-  *    projection coordinates (easting and northing in meters).
-  *
-  * ERROR HANDLING
-  *
-  *    This component checks parameters for valid values.  If an invalid value
-  *    is found the error code is combined with the current error code using
-  *    the bitwise or.  This combining allows multiple error codes to be
-  *    returned. The possible error codes are:
-  *
-  *       OMERC_NO_ERROR           : No errors occurred in function
-  *       OMERC_LAT_ERROR          : Latitude outside of valid range
-  *                                     (-90 to 90 degrees)
-  *       OMERC_LON_ERROR          : Longitude outside of valid range
-  *                                     (-180 to 360 degrees)
-  *       OMERC_ORIGIN_LAT_ERROR   : Origin latitude outside of valid range
-  *                                     (-89 to 89 degrees)
-  *       OMERC_LAT1_ERROR         : First latitude outside of valid range
-  *                                     (-89 to 89 degrees, excluding 0)
-  *       OMERC_LAT2_ERROR         : First latitude outside of valid range
-  *                                     (-89 to 89 degrees)
-  *       OMERC_LON1_ERROR         : First longitude outside of valid range
-  *                                     (-180 to 360 degrees)
-  *       OMERC_LON2_ERROR         : Second longitude outside of valid range
-  *                                     (-180 to 360 degrees)
-  *       OMERC_LAT1_LAT2_ERROR    : First and second latitudes can not be equal
-  *       OMERC_DIFF_HEMISPHERE_ERROR: First and second latitudes can not be
-  *                                     in different hemispheres
-  *       OMERC_EASTING_ERROR      : Easting outside of valid range
-  *                                     (depends on ellipsoid and projection
-  *                                     parameters)
-  *       OMERC_NORTHING_ERROR     : Northing outside of valid range
-  *                                     (depends on ellipsoid and projection
-  *                                     parameters)
-  *       OMERC_A_ERROR            : Semi-major axis less than or equal to zero
-  *       OMERC_INV_F_ERROR        : Inverse flattening outside of valid range
-  *                                     (250 to 350)
-  *       OMERC_SCALE_FACTOR_ERROR : Scale factor outside of valid
-  *                                     range (0.3 to 3.0)
-  *       OMERC_LON_WARNING        : Distortion will result if longitude is 90 degrees or more
-  *                                     from the Central Meridian
-  *
-  * REUSE NOTES
-  *
-  *    OBLIQUE MERCATOR is intended for reuse by any application that 
-  *    performs an Oblique Mercator projection or its inverse.
-  *
-  * REFERENCES
-  *
-  *    Further information on OBLIQUE MERCATOR can be found in the Reuse Manual.
-  *
-  *    OBLIQUE MERCATOR originated from:     U.S. Army Topographic Engineering Center
-  *                                          Geospatial Information Division
-  *                                          7701 Telegraph Road
-  *                                          Alexandria, VA  22310-3864
-  *
-  * LICENSES
-  *
-  *    None apply to this component.
-  *
-  * RESTRICTIONS
-  *
-  *    OBLIQUE MERCATOR has no restrictions.
-  *
-  * ENVIRONMENT
-  *
-  *    OBLIQUE MERCATOR was tested and certified in the following environments:
-  *
-  *    1. Solaris 2.5 with GCC, version 2.8.1
-  *    2. MSDOS with MS Visual C++, version 6
-  *
-  * MODIFICATIONS
-  *
-  *    Date              Description
-  *    ----              -----------
-  *    06-07-00          Original Code
-  *    03-02-07          Original C++ Code
-  *    
-  *
-  */
- 
- 
- #include "CoordinateSystem.h"
- 
- 
- namespace MSP
- {
-   namespace CCS
-   {
-     class ObliqueMercatorParameters;
-     class MapProjectionCoordinates;
-     class GeodeticCoordinates;
- 
- 
-     /***************************************************************************/
-     /*
-      *                              DEFINES
-      */
- 
-     class ObliqueMercator : public CoordinateSystem
-     {
-     public:
- 
-       /*
-        * The constructor receives the ellipsoid parameters and
-        * projection parameters as inputs, and sets the corresponding state
-        * variables.  If any errors occur, an exception is thrown with a description 
-        * of the error.
-        *
-        *    ellipsoidSemiMajorAxis   : Semi-major axis of ellipsoid, in meters  (input)
-        *    ellipsoidFlattening      : Flattening of ellipsoid                  (input)
-        *    originLatitude           : Latitude, in radians, at which the       (input)
-        *                               point scale factor is 1.0
-        *    longitude1               : Longitude, in radians, of first point lying on
-        *                               central line                             (input)
-        *    latitude1                : Latitude, in radians, of first point lying on
-        *                               central line                             (input)
-        *    longitude2               : Longitude, in radians, of second point lying on
-        *                               central line                             (input)
-        *    latitude2                : Latitude, in radians, of second point lying on
-        *                               central line                             (input)
-        *    falseEasting             : A coordinate value, in meters, assigned to the
-        *                               central meridian of the projection       (input)
-        *    falseNorthing            : A coordinate value, in meters, assigned to the
-        *                               origin latitude of the projection        (input)
-        *    scaleFactor              : Multiplier which reduces distances in the
-        *                               projection to the actual distance on the
-        *                               ellipsoid                                (input)
-        *    errorStatus              : Error status                             (output) 
-        */
- 
-         ObliqueMercator( double ellipsoidSemiMajorAxis, double ellipsoidFlattening, double originLatitude, double longitude1, double latitude1, double longitude2, double latitude2, double falseEasting, double falseNorthing, double scaleFactor );
- 
- 
-       ObliqueMercator( const ObliqueMercator &om );
- 
- 
-         ~ObliqueMercator( void );
- 
- 
-       ObliqueMercator& operator=( const ObliqueMercator &om );
- 
- 
-       /*
-        * The function getParameters returns the current ellipsoid
-        * parameters and Oblique Mercator projection parameters.
-        *
-        *    ellipsoidSemiMajorAxis  : Semi-major axis of ellipsoid, in meters  (output)
-        *    ellipsoidFlattening     : Flattening of ellipsoid                  (output)
-        *    originLatitude          : Latitude, in radians, at which the       (output)
-        *                              point scale factor is 1.0
-        *    longitude1              : Longitude, in radians, of first point lying on
-        *                              central line                           (output)
-        *    latitude1               : Latitude, in radians, of first point lying on
-        *                              central line                           (output)
-        *    longitude2              : Longitude, in radians, of second point lying on
-        *                              central line                           (output)
-        *    latitude2               : Latitude, in radians, of second point lying on
-        *                              central line                           (output)
-        *    falseEasting            : A coordinate value, in meters, assigned to the
-        *                              central meridian of the projection     (output)
-        *    falseNorthing           : A coordinate value, in meters, assigned to the
-        *                              origin latitude of the projection      (output)
-        *    scaleFactor             : Multiplier which reduces distances in the
-        *                              projection to the actual distance on the
-        *                              ellipsoid                              (output)
-        */
- 
-       ObliqueMercatorParameters* getParameters() const;
- 
- 
-       /*
-        * The function convertFromGeodetic converts geodetic (latitude and
-        * longitude) coordinates to Oblique Mercator projection (easting and
-        * northing) coordinates, according to the current ellipsoid and Oblique Mercator 
-        * projection parameters.  If any errors occur, an exception is thrown with a description 
-        * of the error.
-        *
-        *    longitude         : Longitude (lambda), in radians       (input)
-        *    latitude          : Latitude (phi), in radians           (input)
-        *    easting           : Easting (X), in meters               (output)
-        *    northing          : Northing (Y), in meters              (output)
-        */
- 
-       MSP::CCS::MapProjectionCoordinates* convertFromGeodetic( MSP::CCS::GeodeticCoordinates* geodeticCoordinates );
- 
- 
-       /*
-        * The function convertToGeodetic converts Oblique Mercator projection
-        * (easting and northing) coordinates to geodetic (latitude and longitude)
-        * coordinates, according to the current ellipsoid and Oblique Mercator projection
-        * coordinates.  If any errors occur, an exception is thrown with a description 
-        * of the error.
-        *
-        *    easting           : Easting (X), in meters                  (input)
-        *    northing          : Northing (Y), in meters                 (input)
-        *    longitude         : Longitude (lambda), in radians          (output)
-        *    latitude          : Latitude (phi), in radians              (output)
-        */
- 
-       MSP::CCS::GeodeticCoordinates* convertToGeodetic( MSP::CCS::MapProjectionCoordinates* mapProjectionCoordinates );
- 
-     private:
-     
-       /* Ellipsoid Parameters, default to WGS 84 */
-       double es;
-       double es_OVER_2;
-       double OMerc_A;
-       double OMerc_B;
-       double OMerc_E;
-       double OMerc_gamma;
-       double OMerc_azimuth;                     /* Azimuth of central line as it crosses origin lat */
-       double OMerc_Origin_Long;                 /* Longitude at center of projection */
-       double cos_gamma;
-       double sin_gamma;
-       double sin_azimuth;  
-       double cos_azimuth;
-       double A_over_B;
-       double B_over_A;
-       double OMerc_u;                           /* Coordinates for center point (uc , vc), vc = 0 */
-                                                 /* at center lat and lon */
-       /* Oblique Mercator projection Parameters */
-       double OMerc_Origin_Lat;                  /* Latitude of projection center, in radians */
-       double OMerc_Lat_1;                       /* Latitude of first point lying on central line */
-       double OMerc_Lon_1;                       /* Longitude of first point lying on central line */
-       double OMerc_Lat_2;                       /* Latitude of second point lying on central line */
-       double OMerc_Lon_2;                       /* Longitude of second point lying on central line */
-       double OMerc_Scale_Factor;                /* Scale factor at projection center */
-       double OMerc_False_Northing;              /* False northing, in meters, at projection center */
-       double OMerc_False_Easting;               /* False easting, in meters, at projection center */
- 
-       double OMerc_Delta_Northing;
-       double OMerc_Delta_Easting;
- 
- 
-       double omercT( double lat, double e_sinlat, double e_over_2 );
- 
-     };
-   }
- }
-
-
-
- /***************************************************************************/
- /* RSC IDENTIFIER: OBLIQUE MERCATOR
-  *
-  * ABSTRACT
-  *
-  *    This component provides conversions between Geodetic coordinates
-  *    (latitude and longitude in radians) and Oblique Mercator
-  *    projection coordinates (easting and northing in meters).
-  *
-  * ERROR HANDLING
-  *
-  *    This component checks parameters for valid values.  If an invalid value
-  *    is found the error code is combined with the current error code using
-  *    the bitwise or.  This combining allows multiple error codes to be
-  *    returned. The possible error codes are:
-  *
-  *       OMERC_NO_ERROR           : No errors occurred in function
-  *       OMERC_LAT_ERROR          : Latitude outside of valid range
-  *                                     (-90 to 90 degrees)
-  *       OMERC_LON_ERROR          : Longitude outside of valid range
-  *                                     (-180 to 360 degrees)
-  *       OMERC_ORIGIN_LAT_ERROR   : Origin latitude outside of valid range
-  *                                     (-89 to 89 degrees)
-  *       OMERC_LAT1_ERROR         : First latitude outside of valid range
-  *                                     (-89 to 89 degrees, excluding 0)
-  *       OMERC_LAT2_ERROR         : First latitude outside of valid range
-  *                                     (-89 to 89 degrees)
-  *       OMERC_LON1_ERROR         : First longitude outside of valid range
-  *                                     (-180 to 360 degrees)
-  *       OMERC_LON2_ERROR         : Second longitude outside of valid range
-  *                                     (-180 to 360 degrees)
-  *       OMERC_LAT1_LAT2_ERROR    : First and second latitudes can not be equal
-  *       OMERC_DIFF_HEMISPHERE_ERROR: First and second latitudes can not be
-  *                                     in different hemispheres
-  *       OMERC_EASTING_ERROR      : Easting outside of valid range
-  *                                     (depends on ellipsoid and projection
-  *                                     parameters)
-  *       OMERC_NORTHING_ERROR     : Northing outside of valid range
-  *                                     (depends on ellipsoid and projection
-  *                                     parameters)
-  *       OMERC_A_ERROR            : Semi-major axis less than or equal to zero
-  *       OMERC_INV_F_ERROR        : Inverse flattening outside of valid range
-  *                                     (250 to 350)
-  *       OMERC_SCALE_FACTOR_ERROR : Scale factor outside of valid
-  *                                     range (0.3 to 3.0)
-  *       OMERC_LON_WARNING        : Distortion will result if longitude is 90 degrees or more
-  *                                     from the Central Meridian
-  *
-  * REUSE NOTES
-  *
-  *    OBLIQUE MERCATOR is intended for reuse by any application that 
-  *    performs an Oblique Mercator projection or its inverse.
-  *
-  * REFERENCES
-  *
-  *    Further information on OBLIQUE MERCATOR can be found in the Reuse Manual.
-  *
-  *    OBLIQUE MERCATOR originated from:     U.S. Army Topographic Engineering Center
-  *                                          Geospatial Information Division
-  *                                          7701 Telegraph Road
-  *                                          Alexandria, VA  22310-3864
-  *
-  * LICENSES
-  *
-  *    None apply to this component.
-  *
-  * RESTRICTIONS
-  *
-  *    OBLIQUE MERCATOR has no restrictions.
-  *
-  * ENVIRONMENT
-  *
-  *    OBLIQUE MERCATOR was tested and certified in the following environments:
-  *
-  *    1. Solaris 2.5 with GCC, version 2.8.1
-  *    2. MSDOS with MS Visual C++, version 6
-  *
-  * MODIFICATIONS
-  *
-  *    Date              Description
-  *    ----              -----------
-  *    06-07-00          Original Code
-  *    03-02-07          Original C++ Code
-  *    05-11-11          BAEts28017 - Fix Oblique Mercator near poles
-  *
-  */
- 
- 
- /***************************************************************************/
- /*
-  *                               INCLUDES
-  */
- 
- #include <math.h>
- #include "ObliqueMercator.h"
- #include "ObliqueMercatorParameters.h"
- #include "MapProjectionCoordinates.h"
- #include "GeodeticCoordinates.h"
- #include "CoordinateConversionException.h"
- #include "ErrorMessages.h"
- #include "WarningMessages.h"
- 
- /*
-  *    math.h     - Standard C math library
-  *    ObliqueMercator.h   - Is for prototype error checking
-  *    MapProjectionCoordinates.h   - defines map projection coordinates
-  *    GeodeticCoordinates.h   - defines geodetic coordinates
-  *    CoordinateConversionException.h - Exception handler
-  *    ErrorMessages.h  - Contains exception messages
-  *    WarningMessages.h  - Contains warning messages
-  */
- 
- 
- using namespace MSP::CCS;
- 
- 
- /***************************************************************************/
- /*                               DEFINES 
-  *
-  */
- 
- const double PI = 3.14159265358979323e0;  /* PI                            */
- const double PI_OVER_2 = ( PI / 2.0);                 
- const double PI_OVER_4 = ( PI / 4.0);                 
- const double TWO_PI = ( 2.0 * PI);                 
- const double MIN_SCALE_FACTOR = 0.3;
- const double MAX_SCALE_FACTOR = 3.0;
- 
- 
- /************************************************************************/
- /*                              FUNCTIONS     
-  *
-  */
- 
- ObliqueMercator::ObliqueMercator( double ellipsoidSemiMajorAxis, double ellipsoidFlattening, double originLatitude, double longitude1, double latitude1, double longitude2, double latitude2, double falseEasting, double falseNorthing, double scaleFactor ) :
-   CoordinateSystem(),
-   es( 0.08181919084262188000 ),
-   es_OVER_2( .040909595421311 ),
-   OMerc_A( 6383471.9177251 ),
-   OMerc_B( 1.0008420825413 ),
-   OMerc_E( 1.0028158089754 ),
-   OMerc_gamma( .41705894983580 ),
-   OMerc_azimuth( .60940407333533 ),
-   OMerc_Origin_Long( -.46732023406900 ),
-   cos_gamma( .91428423352628 ),
-   sin_gamma( .40507325303611 ),
-   sin_azimuth( .57237890829911 ),  
-   cos_azimuth( .81998925927985 ),
-   A_over_B( 6378101.0302010 ),
-   B_over_A( 1.5678647849335e-7 ),
-   OMerc_u( 5632885.2272051 ),
-   OMerc_Origin_Lat( ((45.0 * PI) / 180.0) ),
-   OMerc_Lon_1( ((-5.0 * PI) / 180.0) ),
-   OMerc_Lat_1( ((40.0 * PI) / 180.0) ),
-   OMerc_Lon_2( ((5.0 * PI) / 180.0) ),
-   OMerc_Lat_2( ((50.0 * PI) / 180.0) ),
-   OMerc_False_Easting( 0.0 ),
-   OMerc_False_Northing( 0.0 ),
-   OMerc_Scale_Factor( 1.0 ),
-   OMerc_Delta_Northing( 40000000.0 ),
-   OMerc_Delta_Easting(  40000000.0 )
- {
- /*
-  * The constructor receives the ellipsoid parameters and
-  * projection parameters as inputs, and sets the corresponding state
-  * variables.  If any errors occur, an exception is thrown with a description 
-  * of the error.
-  *
-  *    ellipsoidSemiMajorAxis   : Semi-major axis of ellipsoid, in meters  (input)
-  *    ellipsoidFlattening      : Flattening of ellipsoid                  (input)
-  *    originLatitude           : Latitude, in radians, at which the       (input)
-  *                               point scale factor is 1.0
-  *    longitude1               : Longitude, in radians, of first point lying on
-  *                               central line                             (input)
-  *    latitude1                : Latitude, in radians, of first point lying on
-  *                               central line                             (input)
-  *    longitude2               : Longitude, in radians, of second point lying on
-  *                               central line                             (input)
-  *    latitude2                : Latitude, in radians, of second point lying on
-  *                               central line                             (input)
-  *    falseEasting             : A coordinate value, in meters, assigned to the
-  *                               central meridian of the projection       (input)
-  *    falseNorthing            : A coordinate value, in meters, assigned to the
-  *                               origin latitude of the projection        (input)
-  *    scaleFactor              : Multiplier which reduces distances in the
-  *                               projection to the actual distance on the
-  *                               ellipsoid                                (input)
-  */
- 
-   double inv_f = 1 / ellipsoidFlattening;
-   double es2, one_MINUS_es2;
-   double cos_olat, cos_olat2;
-   double sin_olat, sin_olat2, es2_sin_olat2;
-   double t0, t1, t2;
-   double D, D2, D2_MINUS_1, sqrt_D2_MINUS_1;
-   double H, L, LH;
-   double E2;
-   double F, G, J, P;
-   double dlon;
- 
-   if (ellipsoidSemiMajorAxis <= 0.0)
-   { /* Semi-major axis must be greater than zero */
-     throw CoordinateConversionException( ErrorMessages::semiMajorAxis );
-   }
-   if ((inv_f < 250) || (inv_f > 350))
-   { /* Inverse flattening must be between 250 and 350 */
-     throw CoordinateConversionException( ErrorMessages::ellipsoidFlattening );
-   }
-   if ((originLatitude <= -PI_OVER_2) || (originLatitude >= PI_OVER_2))
-   { /* origin latitude out of range -  can not be at a pole */
-     throw CoordinateConversionException( ErrorMessages::originLatitude );
-   }
-   if ((latitude1 <= -PI_OVER_2) || (latitude1 >= PI_OVER_2))
-   { /* first latitude out of range -  can not be at a pole */
-     throw CoordinateConversionException( ErrorMessages::latitude1 );
-   }
-   if ((latitude2 <= -PI_OVER_2) || (latitude2 >= PI_OVER_2))
-   { /* second latitude out of range -  can not be at a pole */
-     throw CoordinateConversionException( ErrorMessages::latitude2 );
-   }
-   if (latitude1 == 0.0)
-   { /* first latitude can not be at the equator */
-     throw CoordinateConversionException( ErrorMessages::latitude1 );
-   }
-   if (latitude1 == latitude2)
-   { /* first and second latitudes can not be equal */
-     throw CoordinateConversionException( ErrorMessages::latitude2 );
-   }
-   if (((latitude1 < 0.0) && (latitude2 > 0.0)) ||
-       ((latitude1 > 0.0) && (latitude2 < 0.0)))
-   { /*first and second points can not be in different hemispheres */
-     throw CoordinateConversionException( ErrorMessages::omercHemisphere );
-   }
-   if ((longitude1 < -PI) || (longitude1 > TWO_PI))
-   { /* first longitude out of range */
-     throw CoordinateConversionException( ErrorMessages::longitude1 );
-   }
-   if ((longitude2 < -PI) || (longitude2 > TWO_PI))
-   { /* first longitude out of range */
-     throw CoordinateConversionException( ErrorMessages::longitude2 );
-   }
-   if ((scaleFactor < MIN_SCALE_FACTOR) || (scaleFactor > MAX_SCALE_FACTOR))
-   { /* scale factor out of range */
-     throw CoordinateConversionException( ErrorMessages::scaleFactor );
-   }
- 
-   semiMajorAxis = ellipsoidSemiMajorAxis;
-   flattening = ellipsoidFlattening;
- 
-   OMerc_Origin_Lat = originLatitude;
-   OMerc_Lon_1 = longitude1;
-   OMerc_Lat_1 = latitude1;
-   OMerc_Lon_2 = longitude2;
-   OMerc_Lat_2 = latitude2;
-   OMerc_False_Northing = falseNorthing;
-   OMerc_False_Easting = falseEasting;
-   OMerc_Scale_Factor = scaleFactor;
- 
-   es2 = 2 * flattening - flattening * flattening;
-   es = sqrt(es2);
-   one_MINUS_es2 = 1 - es2;
-   es_OVER_2 = es / 2.0;
- 
-   cos_olat = cos(OMerc_Origin_Lat);
-   cos_olat2 = cos_olat * cos_olat;
-   sin_olat = sin(OMerc_Origin_Lat);
-   sin_olat2 = sin_olat * sin_olat;
-   es2_sin_olat2 = es2 * sin_olat2;
- 
-   OMerc_B = sqrt(1 + (es2 * cos_olat2 * cos_olat2) / one_MINUS_es2);
-   OMerc_A = (semiMajorAxis * OMerc_B * OMerc_Scale_Factor * sqrt(one_MINUS_es2)) / (1.0 - es2_sin_olat2);  
-   A_over_B = OMerc_A / OMerc_B;
-   B_over_A = OMerc_B / OMerc_A;
- 
-   t0 = omercT(OMerc_Origin_Lat, es * sin_olat, es_OVER_2);
-   t1 = omercT(OMerc_Lat_1, es * sin(OMerc_Lat_1), es_OVER_2);  
-   t2 = omercT(OMerc_Lat_2, es * sin(OMerc_Lat_2), es_OVER_2);  
- 
-   D = (OMerc_B * sqrt(one_MINUS_es2)) / (cos_olat * sqrt(1.0 - es2_sin_olat2)); 
-   D2 = D * D;
-   if (D2 < 1.0)
-     D2 = 1.0;
-   D2_MINUS_1 = D2 - 1.0;
-   sqrt_D2_MINUS_1 = sqrt(D2_MINUS_1);
-   if (D2_MINUS_1 > 1.0e-10)
-   {
-     if (OMerc_Origin_Lat >= 0.0)
-       OMerc_E = (D + sqrt_D2_MINUS_1) * pow(t0, OMerc_B);
-     else
-       OMerc_E = (D - sqrt_D2_MINUS_1) * pow(t0, OMerc_B);
-   }
-   else
-     OMerc_E = D * pow(t0, OMerc_B);
-   H = pow(t1, OMerc_B);
-   L = pow(t2, OMerc_B);
-   F = OMerc_E / H;
-   G = (F - 1.0 / F) / 2.0;
-   E2 = OMerc_E * OMerc_E;
-   LH = L * H;
-   J = (E2 - LH) / (E2 + LH);
-   P = (L - H) / (L + H);
- 
-   dlon = OMerc_Lon_1 - OMerc_Lon_2;
-   if (dlon < -PI )
-     OMerc_Lon_2 -= TWO_PI;
-   if (dlon > PI)
-     OMerc_Lon_2 += TWO_PI;
-   dlon = OMerc_Lon_1 - OMerc_Lon_2;
-   OMerc_Origin_Long = (OMerc_Lon_1 + OMerc_Lon_2) / 2.0 - (atan(J * tan(OMerc_B * dlon / 2.0) / P)) / OMerc_B;
- 
-   dlon = OMerc_Lon_1 - OMerc_Origin_Long;
-   if (dlon < -PI )
-     OMerc_Origin_Long -= TWO_PI;
-   if (dlon > PI)
-     OMerc_Origin_Long += TWO_PI;
-  
-   dlon = OMerc_Lon_1 - OMerc_Origin_Long;
-   OMerc_gamma = atan(sin(OMerc_B * dlon) / G);
-   cos_gamma = cos(OMerc_gamma);
-   sin_gamma = sin(OMerc_gamma);
- 
-   OMerc_azimuth = asin(D * sin_gamma);
-   cos_azimuth = cos(OMerc_azimuth);
-   sin_azimuth = sin(OMerc_azimuth);
- 
-   if (OMerc_Origin_Lat >= 0)
-     OMerc_u =  A_over_B * atan(sqrt_D2_MINUS_1/cos_azimuth);
-   else
-     OMerc_u = -A_over_B * atan(sqrt_D2_MINUS_1/cos_azimuth);
- }
- 
- 
- ObliqueMercator::ObliqueMercator( const ObliqueMercator &om )
- {
-   semiMajorAxis = om.semiMajorAxis;
-   flattening = om.flattening;
-   es = om.es;     
-   es_OVER_2 = om.es_OVER_2;     
-   OMerc_A = om.OMerc_A;     
-   OMerc_B = om.OMerc_B;     
-   OMerc_E = om.OMerc_E;     
-   OMerc_gamma = om.OMerc_gamma; 
-   OMerc_azimuth = om.OMerc_azimuth; 
-   OMerc_Origin_Long = om.OMerc_Origin_Long; 
-   cos_gamma = om.cos_gamma; 
-   sin_gamma = om.sin_gamma; 
-   sin_azimuth = om.sin_azimuth; 
-   cos_azimuth = om.cos_azimuth; 
-   A_over_B = om.A_over_B; 
-   B_over_A = om.B_over_A; 
-   OMerc_u = om.OMerc_u; 
-   OMerc_Origin_Lat = om.OMerc_Origin_Lat; 
-   OMerc_Lon_1 = om.OMerc_Lon_1; 
-   OMerc_Lat_1 = om.OMerc_Lat_1; 
-   OMerc_Lon_2 = om.OMerc_Lon_2; 
-   OMerc_Lat_2 = om.OMerc_Lat_2; 
-   OMerc_False_Easting = om.OMerc_False_Easting; 
-   OMerc_False_Northing = om.OMerc_False_Northing; 
-   OMerc_Scale_Factor = om.OMerc_Scale_Factor; 
-   OMerc_Delta_Northing = om.OMerc_Delta_Northing; 
-   OMerc_Delta_Easting = om.OMerc_Delta_Easting; 
- }
- 
- 
- ObliqueMercator::~ObliqueMercator()
- {
- }
- 
- 
- ObliqueMercator& ObliqueMercator::operator=( const ObliqueMercator &om )
- {
-   if( this != &om )
-   {
-     semiMajorAxis = om.semiMajorAxis;
-     flattening = om.flattening;
-     es = om.es;     
-     es_OVER_2 = om.es_OVER_2;     
-     OMerc_A = om.OMerc_A;     
-     OMerc_B = om.OMerc_B;     
-     OMerc_E = om.OMerc_E;     
-     OMerc_gamma = om.OMerc_gamma; 
-     OMerc_azimuth = om.OMerc_azimuth; 
-     OMerc_Origin_Long = om.OMerc_Origin_Long; 
-     cos_gamma = om.cos_gamma; 
-     sin_gamma = om.sin_gamma; 
-     sin_azimuth = om.sin_azimuth; 
-     cos_azimuth = om.cos_azimuth; 
-     A_over_B = om.A_over_B; 
-     B_over_A = om.B_over_A; 
-     OMerc_u = om.OMerc_u; 
-     OMerc_Origin_Lat = om.OMerc_Origin_Lat; 
-     OMerc_Lon_1 = om.OMerc_Lon_1; 
-     OMerc_Lat_1 = om.OMerc_Lat_1; 
-     OMerc_Lon_2 = om.OMerc_Lon_2; 
-     OMerc_Lat_2 = om.OMerc_Lat_2; 
-     OMerc_False_Easting = om.OMerc_False_Easting; 
-     OMerc_False_Northing = om.OMerc_False_Northing; 
-     OMerc_Scale_Factor = om.OMerc_Scale_Factor; 
-     OMerc_Delta_Northing = om.OMerc_Delta_Northing; 
-     OMerc_Delta_Easting = om.OMerc_Delta_Easting; 
-   }
- 
-   return *this;
- }
- 
- 
- ObliqueMercatorParameters* ObliqueMercator::getParameters() const
- {
- /*
-  * The function getParameters returns the current ellipsoid
-  * parameters and Oblique Mercator projection parameters.
-  *
-  *    ellipsoidSemiMajorAxis  : Semi-major axis of ellipsoid, in meters  (output)
-  *    ellipsoidFlattening     : Flattening of ellipsoid                  (output)
-  *    originLatitude          : Latitude, in radians, at which the       (output)
-  *                              point scale factor is 1.0
-  *    longitude1              : Longitude, in radians, of first point lying on
-  *                              central line                           (output)
-  *    latitude1               : Latitude, in radians, of first point lying on
-  *                              central line                           (output)
-  *    longitude2              : Longitude, in radians, of second point lying on
-  *                              central line                           (output)
-  *    latitude2               : Latitude, in radians, of second point lying on
-  *                              central line                           (output)
-  *    falseEasting            : A coordinate value, in meters, assigned to the
-  *                              central meridian of the projection     (output)
-  *    falseNorthing           : A coordinate value, in meters, assigned to the
-  *                              origin latitude of the projection      (output)
-  *    scaleFactor             : Multiplier which reduces distances in the
-  *                              projection to the actual distance on the
-  *                              ellipsoid                              (output)
-  */
- 
-   return new ObliqueMercatorParameters( CoordinateType::obliqueMercator, OMerc_Origin_Lat, OMerc_Lon_1, OMerc_Lat_1, OMerc_Lon_2, OMerc_Lat_2, OMerc_False_Easting, OMerc_False_Northing, OMerc_Scale_Factor );
- }
- 
- 
- MSP::CCS::MapProjectionCoordinates* ObliqueMercator::convertFromGeodetic( MSP::CCS::GeodeticCoordinates* geodeticCoordinates )
- {
- /*
-  * The function convertFromGeodetic converts geodetic (latitude and
-  * longitude) coordinates to Oblique Mercator projection (easting and
-  * northing) coordinates, according to the current ellipsoid and Oblique Mercator 
-  * projection parameters.  If any errors occur, an exception is thrown with a description 
-  * of the error.
-  *
-  *    longitude         : Longitude (lambda), in radians       (input)
-  *    latitude          : Latitude (phi), in radians           (input)
-  *    easting           : Easting (X), in meters               (output)
-  *    northing          : Northing (Y), in meters              (output)
-  */
- 
-   double dlam, B_dlam, cos_B_dlam;
-   double t, S, T, V, U;
-   double Q, Q_inv;
-   /* Coordinate axes defined with respect to the azimuth of the center line */
-   /* Natural origin*/
-   double v = 0;
-   double u = 0;
- 
-   double longitude = geodeticCoordinates->longitude();
-   double latitude = geodeticCoordinates->latitude();
- 
-   if ((latitude < -PI_OVER_2) || (latitude > PI_OVER_2))
-   { /* Latitude out of range */
-     throw CoordinateConversionException( ErrorMessages::latitude );
-   }
-   if ((longitude < -PI) || (longitude > TWO_PI))
-   { /* Longitude out of range */
-     throw CoordinateConversionException( ErrorMessages::longitude );
-   }
- 
-   dlam = longitude - OMerc_Origin_Long;
- 
-   char warning[256];
-   warning[0] = '\0';
-   if (fabs(dlam) >= PI_OVER_2)
-   { /* Distortion will result if Longitude is 90 degrees or more from the Central Meridian */
-     strcat( warning, MSP::CCS::WarningMessages::longitude );
-   }
- 
-   if (dlam > PI)
-   {
-     dlam -= TWO_PI;
-   }
-   if (dlam < -PI)
-   {
-     dlam += TWO_PI;
-   }
- 
-   if (fabs(fabs(latitude) - PI_OVER_2) > 1.0e-10)
-   {
-     t = omercT(latitude, es * sin(latitude), es_OVER_2);  
-     Q = OMerc_E / pow(t, OMerc_B);
-     Q_inv = 1.0 / Q;
-     S = (Q - Q_inv) / 2.0;
-     T = (Q + Q_inv) / 2.0;
-     B_dlam = OMerc_B * dlam;
-     V = sin(B_dlam);
-     U = ((-1.0 * V * cos_gamma) + (S * sin_gamma)) / T;
-     if (fabs(fabs(U) - 1.0) < 1.0e-10)
-     { /* Point projects into infinity */
-       throw CoordinateConversionException( ErrorMessages::longitude );
-     }
-     else
-     {
-       v = A_over_B * log((1.0 - U) / (1.0 + U)) / 2.0;
-       cos_B_dlam = cos(B_dlam);
-       if (fabs(cos_B_dlam) < 1.0e-10)
-         u = OMerc_A * B_dlam;
-       // Check for longitude span > 90 degrees
-       else if (fabs(B_dlam) > PI_OVER_2)
-       {
-         double temp = atan(((S * cos_gamma) + (V * sin_gamma)) / cos_B_dlam);
-         if (temp < 0.0)
-           u = A_over_B * (temp + PI);
-         else
-           u = A_over_B * (temp - PI);
-       }
-       else
-         u = A_over_B * atan(((S * cos_gamma) + (V * sin_gamma)) / cos_B_dlam);
-     }
-   }
-   else
-   {
-     if (latitude > 0.0)
-       v = A_over_B * log(tan(PI_OVER_4 - (OMerc_gamma / 2.0)));
-     else
-       v = A_over_B * log(tan(PI_OVER_4 + (OMerc_gamma / 2.0)));
-     u = A_over_B * latitude;
-   }
- 
- 
-   u = u - OMerc_u;
- 
-   double easting = OMerc_False_Easting + v * cos_azimuth + u * sin_azimuth;
-   double northing = OMerc_False_Northing + u * cos_azimuth - v * sin_azimuth;
- 
-   return new MapProjectionCoordinates(
-      CoordinateType::obliqueMercator, warning, easting, northing );
- }
- 
- 
- MSP::CCS::GeodeticCoordinates* ObliqueMercator::convertToGeodetic( MSP::CCS::MapProjectionCoordinates* mapProjectionCoordinates )
- {
- /*
-  * The function convertToGeodetic converts Oblique Mercator projection
-  * (easting and northing) coordinates to geodetic (latitude and longitude)
-  * coordinates, according to the current ellipsoid and Oblique Mercator projection
-  * coordinates.  If any errors occur, an exception is thrown with a description 
-  * of the error.
-  *
-  *    easting           : Easting (X), in meters                  (input)
-  *    northing          : Northing (Y), in meters                 (input)
-  *    longitude         : Longitude (lambda), in radians          (output)
-  *    latitude          : Latitude (phi), in radians              (output)
-  */
- 
-   double dx, dy;
-   /* Coordinate axes defined with respect to the azimuth of the center line */
-   /* Natural origin*/
-   double u, v;
-   double Q_prime, Q_prime_inv;
-   double S_prime, T_prime, V_prime, U_prime;
-   double t;
-   double es_sin;
-   double u_B_over_A;
-   double phi;
-   double temp_phi = 0.0;
-   int count = 60;
-   double longitude, latitude;
- 
-   double easting  = mapProjectionCoordinates->easting();
-   double northing = mapProjectionCoordinates->northing();
- 
-   if ((easting < (OMerc_False_Easting - OMerc_Delta_Easting)) 
-       || (easting > (OMerc_False_Easting + OMerc_Delta_Easting)))
-   { /* Easting out of range  */
-     throw CoordinateConversionException( ErrorMessages::easting );
-   }
-   if ((northing < (OMerc_False_Northing - OMerc_Delta_Northing)) 
-       || (northing > (OMerc_False_Northing + OMerc_Delta_Northing)))
-   { /* Northing out of range */
-     throw CoordinateConversionException( ErrorMessages::northing );
-   }
- 
-   dy = northing - OMerc_False_Northing;
-   dx = easting - OMerc_False_Easting;
-   v = dx * cos_azimuth - dy * sin_azimuth;
-   u = dy * cos_azimuth + dx * sin_azimuth;
-   u = u + OMerc_u;
-   Q_prime = exp(-1.0 * (v * B_over_A ));
-   Q_prime_inv = 1.0 / Q_prime;
-   S_prime = (Q_prime - Q_prime_inv) / 2.0;
-   T_prime = (Q_prime + Q_prime_inv) / 2.0;
-   u_B_over_A = u * B_over_A;
-   V_prime = sin(u_B_over_A);
-   U_prime = (V_prime * cos_gamma + S_prime * sin_gamma) / T_prime;
-   if (fabs(fabs(U_prime) - 1.0) < 1.0e-10)
-   {
-     if (U_prime > 0)
-       latitude = PI_OVER_2;
-     else
-       latitude = -PI_OVER_2;
-     longitude = OMerc_Origin_Long;
-   }
-   else
-   {
-     t = pow(OMerc_E / sqrt((1.0 + U_prime) / (1.0 - U_prime)), 1.0 / OMerc_B);
-     phi = PI_OVER_2 - 2.0 * atan(t);
-     while (fabs(phi - temp_phi) > 1.0e-10 && count)
-     {
-       temp_phi = phi;
-       es_sin = es * sin(phi);
-       phi = PI_OVER_2 - 2.0 * atan(t * pow((1.0 - es_sin) / (1.0 + es_sin), es_OVER_2));
-       count --;
-     }
- 
-     if(!count)
-       throw CoordinateConversionException( ErrorMessages::northing );
- 
-     latitude = phi;
-     longitude = OMerc_Origin_Long - atan2((S_prime * cos_gamma - V_prime * sin_gamma), cos(u_B_over_A)) / OMerc_B;
-   }
- 
-   if (fabs(latitude) < 2.0e-7)  /* force lat to 0 to avoid -0 degrees */
-     latitude = 0.0;
-   if (latitude > PI_OVER_2)  /* force distorted values to 90, -90 degrees */
-     latitude = PI_OVER_2;
-   else if (latitude < -PI_OVER_2)
-     latitude = -PI_OVER_2;
- 
-   if (longitude > PI)
-     longitude -= TWO_PI;
-   if (longitude < -PI)
-     longitude += TWO_PI;
- 
-   if (fabs(longitude) < 2.0e-7)  /* force lon to 0 to avoid -0 degrees */
-     longitude = 0.0;
-   if (longitude > PI)  /* force distorted values to 180, -180 degrees */
-     longitude = PI;
-   else if (longitude < -PI)
-     longitude = -PI;
- 
-   char warning[256];
-   warning[0] = '\0';
-   if (fabs(longitude - OMerc_Origin_Long) >= PI_OVER_2)
-   { /* Distortion results if Longitude > 90 degrees from the Central Meridian */
-     strcat( warning, MSP::CCS::WarningMessages::longitude );
-   }
- 
-   return new GeodeticCoordinates(
-      CoordinateType::geodetic, warning, longitude, latitude );
- }
- 
- 
- double ObliqueMercator::omercT( double lat, double e_sinlat, double e_over_2 )
- {  
-   return (tan(PI_OVER_4 - lat / 2.0)) / (pow((1 - e_sinlat) / (1 + e_sinlat), e_over_2));
- }
- 
-#endif // NOT

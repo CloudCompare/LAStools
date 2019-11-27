@@ -2,7 +2,7 @@
 ===============================================================================
 
   FILE:  geoprojectionconverter.hpp
-  
+
   CONTENTS:
 
     Easy conversion between horizontal datums: UTM coodinates, Transverse
@@ -12,7 +12,7 @@
 
     Converting between UTM coodinates and latitude / longitude coodinates
     adapted from code written by Chuck Gantz (chuck.gantz@globalstar.com)
-  
+
     Converting between Lambert Conformal Conic and latitude / longitude
     adapted from code written by Garrett Potts (gpotts@imagelinks.com)
 
@@ -28,16 +28,19 @@
     Converting between Oblique Mercator and latitude / longitude
     adapted from code written by U.S. Army Topographic Engineering Center
 
+    Converting between Oblique Stereographic and latitude / longitude
+    formulas from "Oblique Stereographic Alternative" by Gerald Evenden and Rueben Schulz
+
   PROGRAMMERS:
-  
+
     martin.isenburg@rapidlasso.com  -  http://rapidlasso.com
     chuck.gantz@globalstar.com
     gpotts@imagelinks.com
     craig.larrimore@noaa.gov
-  
+
   COPYRIGHT:
-  
-    (c) 2007-2015, martin isenburg, rapidlasso - fast tools to catch reality
+
+    (c) 2007-2017, martin isenburg, rapidlasso - fast tools to catch reality
 
     This is free software; you can redistribute and/or modify it under the
     terms of the GNU Lesser General Licence as published by the Free Software
@@ -45,9 +48,15 @@
 
     This software is distributed WITHOUT ANY WARRANTY and without even the
     implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-  
+
   CHANGE HISTORY:
-  
+
+     1 November 2018 -- changes requested by Kirk Waters including GEO_GCS_NAD83_CORS96
+     7 September 2018 -- introduced the LASCopyString macro to replace _strdup
+    30 October 2017 -- '-vertical_evrf2007' for European Vertical Reference Frame 2007
+     1 February 2017 -- set_projection_from_ogc_wkt() from EPSG code of OGC WKT string
+     9 November 2016 -- support "user defined" AlbersEqualArea projection in GeoTIFF
+    30 July 2016 -- no more special handling for stateplanes. just parse for EPSG code
      9 January 2016 -- use GeographicTypeGeoKey not GeogGeodeticDatumGeoKey for custom
      2 January 2016 -- parse 'pcs.csv' file when unknown EPSG code is encountered
     28 June 2015 -- tried to add the Oblique Mercator projection (very incomplete)
@@ -55,7 +64,7 @@
      3 March 2015 -- LCC/TM custom projections write GeogGeodeticDatumGeoKey
     13 August 2014 -- added long overdue ECEF (geocentric) conversion
      8 February 2007 -- created after interviews with purdue and google
-  
+
 ===============================================================================
 */
 #ifndef GEO_PROJECTION_CONVERTER_HPP
@@ -89,14 +98,18 @@ struct GeoProjectionGeoKeys
 #define GEO_GCS_ETRS89             4258
 #define GEO_GCS_NAD27              4267
 #define GEO_GCS_NAD83              4269
+#define GEO_GCS_OSGB1936           4277
 #define GEO_GCS_GDA94              4283
 #define GEO_GCS_SAD69              4291
 #define GEO_GCS_WGS72              4322
 #define GEO_GCS_WGS72BE            4324
 #define GEO_GCS_WGS84              4326
 #define GEO_GCS_NAD83_CSRS         4617
+#define GEO_GCS_SWEREF99           4619
 #define GEO_GCS_NAD83_NSRS2007     4759
 #define GEO_GCS_NAD83_2011         6318
+#define GEO_GCS_NAD83_PA11         6322
+#define GEO_GCS_NAD83_CORS96       6783
 
 #define GEO_SPHEROID_AIRY          7001
 #define GEO_SPHEROID_BESSEL1841    7004
@@ -110,9 +123,24 @@ struct GeoProjectionGeoKeys
 #define GEO_VERTICAL_WGS84         5030
 #define GEO_VERTICAL_NGVD29        5102
 #define GEO_VERTICAL_NAVD88        5103
-#define GEO_VERTICAL_CGVD2013      1127
 #define GEO_VERTICAL_CGVD28        5114
 #define GEO_VERTICAL_DVR90         5206
+#define GEO_VERTICAL_EVRF2007      5215
+#define GEO_VERTICAL_NN54          5776
+#define GEO_VERTICAL_DHHN92        5783
+#define GEO_VERTICAL_NN2000        5941
+#define GEO_VERTICAL_CGVD2013      6647 
+#define GEO_VERTICAL_DHHN2016      7837
+#define GEO_VERTICAL_NZVD2016      7839 
+
+#define GEO_VERTICAL_NAVD88_GEOID96   965103
+#define GEO_VERTICAL_NAVD88_GEOID99   995103
+#define GEO_VERTICAL_NAVD88_GEOID03  1035103
+#define GEO_VERTICAL_NAVD88_GEOID06  1065103
+#define GEO_VERTICAL_NAVD88_GEOID09  1095103
+#define GEO_VERTICAL_NAVD88_GEOID12  1125103
+#define GEO_VERTICAL_NAVD88_GEOID12A 1135103
+#define GEO_VERTICAL_NAVD88_GEOID12B 1145103
 
 class GeoProjectionEllipsoid
 {
@@ -212,6 +240,16 @@ public:
   double hom_azimuth_degree;
   double hom_rectified_grid_angle_degree;
   double hom_scale_factor;
+  double hom_latitude_of_center_radian;
+  double hom_longitude_of_center_radian;
+  double hom_azimuth_radian;
+  double hom_rectified_grid_angle_radian;
+
+  double hom_A;
+  double hom_B;
+  double hom_H;
+  double hom_g0;
+  double hom_l0;
 };
 
 class GeoProjectionParametersOS : public GeoProjectionParameters
@@ -224,6 +262,14 @@ public:
   double os_scale_factor;
   double os_lat_origin_radian;
   double os_long_meridian_radian;
+  double os_R2;
+  double os_C;
+  double os_phic0;
+  double os_sinc0;
+  double os_cosc0;
+  double os_ratexp;
+  double os_K;
+  double os_gf;
 };
 
 class GeoProjectionConverter
@@ -237,13 +283,13 @@ public:
 
   // set & get current projection
 
-  bool set_projection_from_geo_keys(int num_geo_keys, GeoProjectionGeoKeys* geo_keys, char* geo_ascii_params, double* geo_double_params, char* description=0);
+  bool set_projection_from_geo_keys(int num_geo_keys, const GeoProjectionGeoKeys* geo_keys, char* geo_ascii_params, double* geo_double_params, char* description=0);
   bool get_geo_keys_from_projection(int& num_geo_keys, GeoProjectionGeoKeys** geo_keys, int& num_geo_double_params, double** geo_double_params, bool source=true);
-  bool set_projection_from_ogc_wkt(int len, char* ogc_wkt);
+  bool set_projection_from_ogc_wkt(const char* ogc_wkt, char* description=0);
   bool get_ogc_wkt_from_projection(int& len, char** ogc_wkt, bool source=true);
+  bool get_prj_from_projection(int& len, char** prj, bool source=true);
   bool get_proj4_string_from_projection(int& len, char** proj4, bool source=true);
 
-  short get_GTModelTypeGeoKey() const;
   short get_GTRasterTypeGeoKey() const;
   short get_GeographicTypeGeoKey() const;
   short get_GeogGeodeticDatumGeoKey() const;
@@ -258,19 +304,22 @@ public:
   short get_GeogAzimuthUnitsGeoKey() const;
   double get_GeogPrimeMeridianLongGeoKey() const;
 
+  bool set_GTModelTypeGeoKey(short value, char* description=0);
+  short get_GTModelTypeGeoKey() const;
+
   bool set_ProjectedCSTypeGeoKey(short value, char* description=0);
   short get_ProjectedCSTypeGeoKey(bool source=true) const;
 
   int set_GeogEllipsoidGeoKey(short value);
   short get_GeogEllipsoidGeoKey() const;
 
-  bool set_ProjLinearUnitsGeoKey(short value);
+  bool set_ProjLinearUnitsGeoKey(short value, bool source=true);
   short get_ProjLinearUnitsGeoKey(bool source=true) const;
 
   bool set_VerticalUnitsGeoKey(short value);
   short get_VerticalUnitsGeoKey(bool source=true) const;
 
-  bool set_VerticalCSTypeGeoKey(short value);
+  bool set_VerticalCSTypeGeoKey(short value, char* description=0);
   short get_VerticalCSTypeGeoKey();
 
   bool set_reference_ellipsoid(int id, char* description=0);
@@ -354,6 +403,9 @@ public:
   bool HOMtoLL(const double HOMEastingMeter, const double HOMNorthingMeter, double& LatDegree, double& LongDegree, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersHOM* hom) const;
   bool LLtoHOM(const double LatDegree, const double LongDegree, double &HOMEastingMeter, double &HOMNorthingMeter, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersHOM* hom) const;
 
+  bool OStoLL(const double OSEastingMeter, const double OSNorthingMeter, double& LatDegree,  double& LongDegree, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersOS* os) const;
+  bool LLtoOS(const double LatDegree, const double LongDegree, double& OSEastingMeter,  double& OSNorthingMeter, const GeoProjectionEllipsoid* ellipsoid, const GeoProjectionParametersOS* os) const;
+
   GeoProjectionConverter();
   ~GeoProjectionConverter();
 
@@ -362,7 +414,7 @@ public:
   bool to_lon_lat_ele(double* point) const;
   bool to_lon_lat_ele(const double* point, double& longitude, double& latitude, double& elevation_in_meter) const;
 
-  // from current projection to target projection 
+  // from current projection to target projection
 
   bool to_target(double* point) const;
   bool to_target(const double* point, double& x, double& y, double& elevation) const;
@@ -378,7 +430,7 @@ public:
 //  int get_img_projection_number(bool source=true) const;
   bool get_dtm_projection_parameters(short* horizontal_units, short* vertical_units, short* coordinate_system, short* coordinate_zone, short* horizontal_datum, short* vertical_datum, bool source=true);
   bool set_dtm_projection_parameters(short horizontal_units, short vertical_units, short coordinate_system, short coordinate_zone, short horizontal_datum, short vertical_datum, bool source=true);
-  
+
   // helps us to find the 'pcs.csv' file
   char* argv_zero;
 
@@ -406,6 +458,7 @@ private:
 
   // vertical coordinate system
   short vertical_geokey;
+  int vertical_geoid;
 
   // parameters for coordinate scaling
   bool coordinate_units_set[2];
@@ -425,8 +478,8 @@ private:
   void compute_lcc_parameters(bool source);
   void compute_tm_parameters(bool source);
   void compute_aeac_parameters(bool source);
-//  void compute_hom_parameters(bool source);
-//  void compute_os_parameters(bool source);
+  void compute_hom_parameters(bool source);
+  void compute_os_parameters(bool source);
 };
 
 #endif

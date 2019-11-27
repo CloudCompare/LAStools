@@ -20,7 +20,7 @@
 
   COPYRIGHT:
 
-    (c) 2005-2014, martin isenburg, rapidlasso - fast tools to catch reality
+    (c) 2005-2018, martin isenburg, rapidlasso - fast tools to catch reality
 
     This is free software; you can redistribute and/or modify it under the
     terms of the GNU Lesser General Licence as published by the Free Software
@@ -31,6 +31,8 @@
   
   CHANGE HISTORY:
   
+    19 April 2017 -- support for selective decompression for new LAS 1.4 points 
+    1 February 2017 -- better support for OGC WKT strings in VLRs or EVLRs
     22 June 2016 -- set default of VLR header "reserved" to 0 instead of 0xAABB
     1 August 2015 -- moving LASpoint, LASquantizer, and LASattributer to LASzip
     9 December 2013 -- bug fix and improved writing of new LAS 1.4 point types
@@ -47,7 +49,7 @@
 #ifndef LAS_DEFINITIONS_HPP
 #define LAS_DEFINITIONS_HPP
 
-#define LAS_TOOLS_VERSION 160703
+#define LAS_TOOLS_VERSION 191127
 
 #include <stdio.h>
 #include <string.h>
@@ -66,10 +68,11 @@
 #define LAS_TOOLS_FORMAT_VRML    5
 #define LAS_TOOLS_FORMAT_TXT     6
 #define LAS_TOOLS_FORMAT_SHP     7
-#define LAS_TOOLS_FORMAT_ASC     8
-#define LAS_TOOLS_FORMAT_BIL     9
-#define LAS_TOOLS_FORMAT_FLT    10
-#define LAS_TOOLS_FORMAT_DTM    11
+#define LAS_TOOLS_FORMAT_PLY     8
+#define LAS_TOOLS_FORMAT_ASC     9
+#define LAS_TOOLS_FORMAT_BIL    10
+#define LAS_TOOLS_FORMAT_FLT    11
+#define LAS_TOOLS_FORMAT_DTM    12
 
 #define LAS_TOOLS_GLOBAL_ENCODING_BIT_GPS_TIME_TYPE 0
 #define LAS_TOOLS_GLOBAL_ENCODING_BIT_WDP_INTERNAL  1
@@ -175,6 +178,26 @@ public:
   F64 min_y;
   F64 max_z;
   F64 min_z;
+
+  LASvlr_lasoriginal()
+  {
+    number_of_point_records = 0;
+    number_of_points_by_return[0] = 0;
+    number_of_points_by_return[1] = 0;
+    number_of_points_by_return[2] = 0;
+    number_of_points_by_return[3] = 0;
+    number_of_points_by_return[4] = 0;
+    number_of_points_by_return[5] = 0;
+    number_of_points_by_return[6] = 0;
+    number_of_points_by_return[7] = 0;
+    number_of_points_by_return[8] = 0;
+    number_of_points_by_return[9] = 0;
+    number_of_points_by_return[10] = 0;
+    number_of_points_by_return[11] = 0;
+    number_of_points_by_return[12] = 0;
+    number_of_points_by_return[13] = 0;
+    number_of_points_by_return[14] = 0;
+  }
 };
 
 class LASheader : public LASquantizer, public LASattributer
@@ -225,8 +248,8 @@ public:
   LASvlr_key_entry* vlr_geo_key_entries;
   F64* vlr_geo_double_params;
   CHAR* vlr_geo_ascii_params;
-  CHAR* vlr_geo_wkt_ogc_math;
-  CHAR* vlr_geo_wkt_ogc_cs;
+  CHAR* vlr_geo_ogc_wkt_math;
+  CHAR* vlr_geo_ogc_wkt;
   LASvlr_classification* vlr_classification;
   LASvlr_wave_packet_descr** vlr_wave_packet_descr;
 
@@ -288,6 +311,11 @@ public:
     global_encoding |= (1 << bit);
   }
 
+  void unset_global_encoding_bit(I32 bit)
+  {
+    global_encoding &= ~(1 << bit);
+  }
+
   BOOL get_global_encoding_bit(I32 bit) const
   {
     return (BOOL)(global_encoding & (1 << bit));
@@ -340,8 +368,8 @@ public:
       vlr_geo_key_entries = 0;
       vlr_geo_double_params = 0;
       vlr_geo_ascii_params = 0;
-      vlr_geo_wkt_ogc_math = 0;
-      vlr_geo_wkt_ogc_cs = 0;
+      vlr_geo_ogc_wkt_math = 0;
+      vlr_geo_ogc_wkt = 0;
       vlr_classification = 0;
       if (vlr_wave_packet_descr) delete [] vlr_wave_packet_descr;
       vlr_wave_packet_descr = 0;
@@ -363,9 +391,9 @@ public:
       }
       free(evlrs);
       evlrs = 0;
-      start_of_first_extended_variable_length_record = 0;
-      number_of_extended_variable_length_records = 0;
     }
+    start_of_first_extended_variable_length_record = 0;
+    number_of_extended_variable_length_records = 0;
   };
 
   void clean_laszip()
@@ -433,7 +461,7 @@ public:
     vlr_lasoriginal = 0;
     user_data_after_header_size = 0;
     user_data_after_header = 0;
-    number_attributes = 0;
+    attributes_linked = FALSE;
     offset_to_point_data = header_size;
   }
 
@@ -483,7 +511,10 @@ public:
     }
     if (max_x < min_x || max_y < min_y || max_z < min_z)
     {
-      fprintf(stderr,"WARNING: invalid bounding box [ %g %g %g / %g %g %g ]\n", min_x, min_y, min_z, max_x, max_y, max_z);
+      if (number_of_point_records || extended_number_of_point_records)
+      {
+        fprintf(stderr,"WARNING: invalid bounding box [ %g %g %g / %g %g %g ]\n", min_x, min_y, min_z, max_x, max_y, max_z);
+      }
     }
     return TRUE;
   };
@@ -500,18 +531,23 @@ public:
     return FALSE;
   };
 
-  BOOL is_lonlat() const
+  BOOL is_lonlat(const F32 extend = 1.0f) const
   {
     if ((-360.0 <= min_x) && (-90.0 <= min_y) && (max_x <= 360.0) && (max_y <= 90.0))
     {
-      return TRUE;
+      // the x and y coordinates are within the longitude/latitude range
+      if (((max_x - min_x) <= extend) && ((max_y - min_y) <= extend))
+      {
+        // the x and y coordinate ranges are within the maximal extend
+        return TRUE;
+      }
     }
     return FALSE;
   };
 
   // note that data needs to be allocated with new [] and not malloc and that LASheader
   // will become the owner over this and manage its deallocation 
-  void add_vlr(const CHAR* user_id, const U16 record_id, const U16 record_length_after_header, U8* data, const BOOL keep_description=FALSE, const CHAR* description=0, const BOOL keep_existing=FALSE)
+  BOOL add_vlr(const CHAR* user_id, const U16 record_id, const U16 record_length_after_header, U8* data, const BOOL keep_description=FALSE, const CHAR* description=0, const BOOL keep_existing=FALSE)
   {
     U32 i = 0;
     BOOL found_description = FALSE;
@@ -549,8 +585,9 @@ public:
     {
       number_of_variable_length_records = 1;
       offset_to_point_data += 54;
-      vlrs = (LASvlr*)malloc(sizeof(LASvlr)*number_of_variable_length_records);
+      vlrs = (LASvlr*)malloc(sizeof(LASvlr));
     }
+    memset(&(vlrs[i]), 0, sizeof(LASvlr));
     vlrs[i].reserved = 0; // used to be 0xAABB
     strncpy(vlrs[i].user_id, user_id, 16);
     vlrs[i].record_id = record_id;
@@ -576,6 +613,7 @@ public:
     {
       vlrs[i].data = 0;
     }
+		return TRUE;
   };
 
   const LASvlr* get_vlr(const CHAR* user_id, U16 record_id) const
@@ -591,7 +629,7 @@ public:
     return 0;
   };
 
-  BOOL remove_vlr(U32 i)
+  BOOL remove_vlr(U32 i, BOOL delete_data=TRUE)
   {
     if (vlrs)
     {
@@ -600,7 +638,10 @@ public:
         offset_to_point_data -= (54 + vlrs[i].record_length_after_header);
         if (vlrs[i].record_length_after_header)
         {
-          delete [] vlrs[i].data;
+          if (delete_data)
+          {
+            delete [] vlrs[i].data;
+          }
         }
         number_of_variable_length_records--;
         if (number_of_variable_length_records)
@@ -613,8 +654,9 @@ public:
           free(vlrs);
           vlrs = 0;
         }
+        return TRUE;
       }
-      return TRUE;
+      return FALSE;
     }
     return FALSE;
   };
@@ -627,6 +669,116 @@ public:
       if ((strcmp(vlrs[i].user_id, user_id) == 0) && (vlrs[i].record_id == record_id))
       {
         return remove_vlr(i);
+      }
+    }
+    return FALSE;
+  };
+
+  // note that data needs to be allocated with new [] and not malloc and that LASheader
+  // will become the owner over this and manage its deallocation 
+  void add_evlr(const CHAR* user_id, const U16 record_id, const I64 record_length_after_header, U8* data, const BOOL keep_description=FALSE, const CHAR* description=0, const BOOL keep_existing=FALSE)
+  {
+    U32 i = 0;
+    BOOL found_description = FALSE;
+    if (evlrs)
+    {
+      if (keep_existing)
+      {
+        i = number_of_variable_length_records;
+      }
+      else
+      {
+        for (i = 0; i < number_of_variable_length_records; i++)
+        {
+          if ((strcmp(evlrs[i].user_id, user_id) == 0) && (evlrs[i].record_id == record_id))
+          {
+            if (evlrs[i].record_length_after_header)
+            {
+              delete [] evlrs[i].data;
+              evlrs[i].data = 0;
+            }
+            found_description = TRUE;
+            break;
+          }
+        }
+      }
+      if (i == number_of_extended_variable_length_records)
+      {
+        number_of_extended_variable_length_records++;
+        evlrs = (LASevlr*)realloc(evlrs, sizeof(LASevlr)*number_of_extended_variable_length_records);
+      }
+    }
+    else
+    {
+      number_of_extended_variable_length_records = 1;
+      evlrs = (LASevlr*)malloc(sizeof(LASevlr)*number_of_extended_variable_length_records);
+    }
+    evlrs[i].reserved = 0; // used to be 0xAABB
+    strncpy(evlrs[i].user_id, user_id, 16);
+    evlrs[i].record_id = record_id;
+    evlrs[i].record_length_after_header = record_length_after_header;
+    if (keep_description && found_description)
+    {
+      // do nothing
+    }
+    else if (description)
+    {
+      sprintf(evlrs[i].description, "%.31s", description);
+    }
+    else
+    {
+      sprintf(evlrs[i].description, "by LAStools of rapidlasso GmbH");
+    }
+    if (record_length_after_header)
+    {
+      evlrs[i].data = data;
+    }
+    else
+    {
+      evlrs[i].data = 0;
+    }
+  };
+
+  BOOL remove_evlr(U32 i, BOOL delete_data=TRUE)
+  {
+    if (evlrs)
+    {
+      if (i < number_of_extended_variable_length_records)
+      {
+        if (evlrs[i].record_length_after_header)
+        {
+          if (delete_data)
+          {
+            delete [] evlrs[i].data;
+          }
+        }
+        number_of_extended_variable_length_records--;
+        if (number_of_extended_variable_length_records)
+        {
+          evlrs[i] = evlrs[number_of_extended_variable_length_records];
+          evlrs = (LASevlr*)realloc(evlrs, sizeof(LASvlr)*number_of_extended_variable_length_records);
+        }
+        else
+        {
+          free(evlrs);
+          evlrs = 0;
+          start_of_first_extended_variable_length_record = 0;
+        }
+        return TRUE;
+      }
+      return FALSE;
+    }
+    return FALSE;
+  };
+
+  BOOL remove_evlr(const CHAR* user_id, U16 record_id)
+  {
+    U32 i;
+    for (i = 0; i < number_of_extended_variable_length_records; i++)
+    {
+      if ((strcmp(evlrs[i].user_id, user_id) == 0) && (evlrs[i].record_id == record_id))
+      {
+        return remove_evlr(i);
       }
     }
     return FALSE;
@@ -732,8 +884,12 @@ public:
     return FALSE;
   }
 
-  void set_geo_keys(const I32 number_of_keys, const LASvlr_key_entry* geo_keys)
+  BOOL set_geo_keys(const I32 number_of_keys, const LASvlr_key_entry* geo_keys)
   {
+    if ((sizeof(LASvlr_geo_keys)*(number_of_keys+1)) > U16_MAX)
+		{
+			return FALSE;
+		}
     vlr_geo_keys = new LASvlr_geo_keys[number_of_keys+1];
     vlr_geo_keys->key_directory_version = 1;
     vlr_geo_keys->key_revision = 1;
@@ -741,85 +897,125 @@ public:
     vlr_geo_keys->number_of_keys = number_of_keys;
     vlr_geo_key_entries = (LASvlr_key_entry*)&vlr_geo_keys[1];
     memcpy(vlr_geo_key_entries, geo_keys, sizeof(LASvlr_key_entry)*number_of_keys);
-    add_vlr("LASF_Projection", 34735, sizeof(LASvlr_geo_keys)*(number_of_keys+1), (U8*)vlr_geo_keys);
+    return add_vlr("LASF_Projection", 34735, (U16)(sizeof(LASvlr_geo_keys)*(number_of_keys+1)), (U8*)vlr_geo_keys);
   }
 
-  void set_geo_double_params(const I32 num_geo_double_params, const F64* geo_double_params)
+  BOOL set_geo_double_params(const I32 num_geo_double_params, const F64* geo_double_params)
   {
+    if ((sizeof(F64)*num_geo_double_params) > U16_MAX)
+		{
+			return FALSE;
+		}
     vlr_geo_double_params = new F64[num_geo_double_params];
     memcpy(vlr_geo_double_params, geo_double_params, sizeof(F64)*num_geo_double_params);
-    add_vlr("LASF_Projection", 34736, sizeof(F64)*num_geo_double_params, (U8*)vlr_geo_double_params);
+    return add_vlr("LASF_Projection", 34736, (U16)(sizeof(F64)*num_geo_double_params), (U8*)vlr_geo_double_params);
   }
 
   void del_geo_double_params()
   {
+    remove_vlr("LASF_Projection", 34736);
     if (vlr_geo_double_params)
     {
-      remove_vlr("LASF_Projection", 34736);
       vlr_geo_double_params = 0;
     }
   }
 
-  void set_geo_ascii_params(const I32 num_geo_ascii_params, const CHAR* geo_ascii_params)
+  BOOL set_geo_ascii_params(const I32 num_geo_ascii_params, const CHAR* geo_ascii_params)
   {
+    if ((sizeof(CHAR)*num_geo_ascii_params) > U16_MAX)
+		{
+			return FALSE;
+		}
     vlr_geo_ascii_params = new CHAR[num_geo_ascii_params];
     memcpy(vlr_geo_ascii_params, geo_ascii_params, sizeof(CHAR)*num_geo_ascii_params);
-    add_vlr("LASF_Projection", 34737, sizeof(CHAR)*num_geo_ascii_params, (U8*)vlr_geo_ascii_params);
+    return add_vlr("LASF_Projection", 34737, (U16)(sizeof(CHAR)*num_geo_ascii_params), (U8*)vlr_geo_ascii_params);
   }
 
   void del_geo_ascii_params()
   {
+    remove_vlr("LASF_Projection", 34737);
     if (vlr_geo_ascii_params)
     {
-      remove_vlr("LASF_Projection", 34737);
       vlr_geo_ascii_params = 0;
     }
   }
 
   void set_geo_wkt_ogc_math(const I32 num_geo_wkt_ogc_math, const CHAR* geo_wkt_ogc_math)
   {
-    vlr_geo_wkt_ogc_math = new CHAR[num_geo_wkt_ogc_math];
-    memcpy(vlr_geo_wkt_ogc_math, geo_wkt_ogc_math, sizeof(CHAR)*num_geo_wkt_ogc_math);
-    add_vlr("LASF_Projection", 2111, sizeof(CHAR)*num_geo_wkt_ogc_math, (U8*)vlr_geo_wkt_ogc_math);
+    I32 null_terminator = 0;
+    if (geo_wkt_ogc_math[num_geo_wkt_ogc_math-1] == '\0')
+    {
+      vlr_geo_ogc_wkt_math = new CHAR[num_geo_wkt_ogc_math];
+    }
+    else
+    {
+      null_terminator = 1;
+      vlr_geo_ogc_wkt_math = new CHAR[num_geo_wkt_ogc_math+1];
+      vlr_geo_ogc_wkt_math[num_geo_wkt_ogc_math] = '\0';
+    }
+    memcpy(vlr_geo_ogc_wkt_math, geo_wkt_ogc_math, sizeof(CHAR)*num_geo_wkt_ogc_math);
+    add_vlr("LASF_Projection", 2111, (U16)(sizeof(CHAR)*(num_geo_wkt_ogc_math+null_terminator)), (U8*)vlr_geo_ogc_wkt_math);
   }
 
   void del_geo_wkt_ogc_math()
   {
-    if (vlr_geo_wkt_ogc_math)
+    if (vlr_geo_ogc_wkt_math)
     {
       remove_vlr("LASF_Projection", 2111);
-      vlr_geo_wkt_ogc_math = 0;
+      vlr_geo_ogc_wkt_math = 0;
     }
   }
 
-  void set_geo_wkt_ogc_cs(const I32 num_geo_wkt_ogc_cs, const CHAR* geo_wkt_ogc_cs)
+  void set_geo_ogc_wkt(const I32 num_geo_ogc_wkt, const CHAR* geo_ogc_wkt, BOOL in_evlr=FALSE)
   {
-    vlr_geo_wkt_ogc_cs = new CHAR[num_geo_wkt_ogc_cs];
-    memcpy(vlr_geo_wkt_ogc_cs, geo_wkt_ogc_cs, sizeof(CHAR)*num_geo_wkt_ogc_cs);
-    add_vlr("LASF_Projection", 2112, sizeof(CHAR)*num_geo_wkt_ogc_cs, (U8*)vlr_geo_wkt_ogc_cs);
-  }
-
-  void del_geo_wkt_ogc_cs()
-  {
-    if (vlr_geo_wkt_ogc_cs)
+    I32 null_terminator = 0;
+    if (geo_ogc_wkt[num_geo_ogc_wkt-1] == '\0')
     {
-      remove_vlr("LASF_Projection", 2112);
-      vlr_geo_wkt_ogc_cs = 0;
-    }
-  }
-
-  void update_extra_bytes_vlr(const BOOL keep_description=FALSE)
-  {
-    if (number_attributes)
-    {
-      U16 record_length_after_header = sizeof(LASattribute)*number_attributes;
-      U8* data = new U8[record_length_after_header];
-      memcpy(data, attributes, record_length_after_header);
-      add_vlr("LASF_Spec", 4, record_length_after_header, data, keep_description);
+      vlr_geo_ogc_wkt = new CHAR[num_geo_ogc_wkt];
     }
     else
     {
-      remove_vlr("LASF_Spec", 4);
+      null_terminator = 1;
+      vlr_geo_ogc_wkt = new CHAR[num_geo_ogc_wkt+1];
+      vlr_geo_ogc_wkt[num_geo_ogc_wkt] = '\0';
+    }
+    memcpy(vlr_geo_ogc_wkt, geo_ogc_wkt, sizeof(CHAR)*num_geo_ogc_wkt);
+    if (in_evlr)
+    {
+      add_evlr("LASF_Projection", 2112, sizeof(CHAR)*(num_geo_ogc_wkt+null_terminator), (U8*)vlr_geo_ogc_wkt);
+    }
+    else
+    {
+      add_vlr("LASF_Projection", 2112, (U16)(sizeof(CHAR)*(num_geo_ogc_wkt+null_terminator)), (U8*)vlr_geo_ogc_wkt);
+    }
+  }
+
+  void del_geo_ogc_wkt()
+  {
+    if (vlr_geo_ogc_wkt)
+    {
+      remove_vlr("LASF_Projection", 2112);
+      remove_evlr("LASF_Projection", 2112);
+      vlr_geo_ogc_wkt = 0;
+    }
+  }
+
+  BOOL update_extra_bytes_vlr(const BOOL keep_description=FALSE)
+  {
+    if (number_attributes)
+    {
+      if ((sizeof(LASattribute)*number_attributes) > U16_MAX)
+      {
+        return FALSE;
+      }
+      U16 record_length_after_header = (U16)(sizeof(LASattribute)*number_attributes);
+      U8* data = new U8[record_length_after_header];
+      memcpy(data, attributes, record_length_after_header);
+      return add_vlr("LASF_Spec", 4, record_length_after_header, data, keep_description);
+    }
+    else
+    {
+      return remove_vlr("LASF_Spec", 4);
     }
   }
 

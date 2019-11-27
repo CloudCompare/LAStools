@@ -80,7 +80,7 @@ BSC32=bscmake.exe
 # ADD BSC32 /nologo
 LINK32=link.exe
 # ADD BASE LINK32 kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /pdbtype:sept
-# ADD LINK32 ../laslib/lib/LASlibD.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /out:"Debug_without_GUI/lasmerge-cli.exe" /pdbtype:sept
+# ADD LINK32 ../LASlib/lib/LASlibD.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /out:"Debug_without_GUI/lasmerge-cli.exe" /pdbtype:sept
 # Begin Special Build Tool
 SOURCE="$(InputPath)"
 PostBuild_Cmds=copy Debug_without_GUI\lasmerge-cli.exe ..\bin\lasmerge-cli.exe
@@ -101,7 +101,7 @@ PostBuild_Cmds=copy Debug_without_GUI\lasmerge-cli.exe ..\bin\lasmerge-cli.exe
 # PROP Ignore_Export_Lib 0
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /w /W0 /GX /O2 /I "..\laslib\inc" /D "NDEBUG" /D "WIN32" /D "_CONSOLE" /D "_MBCS" /YX /FD /c
-# ADD CPP /nologo /W3 /GX /O2 /I "..\laszip\src" /I "..\laslib\inc" /I "..\src" /I "..\src_full\glui_api" /I "..\src_full\glut_api" /D "NDEBUG" /D "COMPILE_WITH_GUI" /D "WIN32" /D "_CONSOLE" /D "_MBCS" /YX /FD /c
+# ADD CPP /nologo /W3 /GX /O2 /I "..\laszip\src" /I "..\laslib\inc" /I "..\src" /I "..\src_full\glui_api" /I "..\src_full\glut_api" /I "..\src_full\png_api" /I "..\src_full\zlib_api" /I "..\src_full\geotiff_api" /I "..\src_full\tiff_api" /D "NDEBUG" /D "COMPILE_WITH_GUI" /D "COMPILE_WITH_MULTI_CORE" /D "WIN32" /D "_CONSOLE" /D "_MBCS" /YX /FD /c
 # ADD BASE RSC /l 0x409 /i "../src" /d "NDEBUG"
 # ADD RSC /l 0x409 /i "../src" /d "NDEBUG"
 BSC32=bscmake.exe
@@ -109,7 +109,7 @@ BSC32=bscmake.exe
 # ADD BSC32 /nologo
 LINK32=link.exe
 # ADD BASE LINK32 ../laslib/lib/LASlib.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /machine:I386
-# ADD LINK32 ../laslib/lib/LASlib.lib ../src_full/glui_api/glui32.lib ../src_full/glut_api/glutstatic.lib ../src_full/glut_api/glut32.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /machine:I386
+# ADD LINK32 ../LASlib/lib/LASlib.lib ../src_full/glui_api/glui32.lib ../src_full/glut_api/glutstatic.lib ../src_full/glut_api/glut32.lib ../src_full/png_api/libpng.lib ../src_full/zlib_api/zlib.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /machine:I386
 # Begin Special Build Tool
 SOURCE="$(InputPath)"
 PostBuild_Cmds=copy Release\lasmerge.exe ..\bin\lasmerge.exe
@@ -130,7 +130,7 @@ PostBuild_Cmds=copy Release\lasmerge.exe ..\bin\lasmerge.exe
 # PROP Ignore_Export_Lib 0
 # PROP Target_Dir ""
 # ADD BASE CPP /nologo /w /W0 /Gm /GX /ZI /Od /I "..\laslib\inc" /D "_DEBUG" /D "WIN32" /D "_CONSOLE" /D "_MBCS" /YX /FD /GZ /c
-# ADD CPP /nologo /w /W0 /Gm /GX /ZI /Od /I "..\laszip\src" /I "..\laslib\inc" /I "..\src" /I "..\src_full\glui_api" /I "..\src_full\glut_api" /D "_DEBUG" /D "COMPILE_WITH_GUI" /D "WIN32" /D "_CONSOLE" /D "_MBCS" /YX /FD /GZ /c
+# ADD CPP /nologo /w /W0 /Gm /GX /ZI /Od /I "..\laszip\src" /I "..\laslib\inc" /I "..\src" /I "..\src_full\glui_api" /I "..\src_full\glut_api" /I "..\src_full\png_api" /I "..\src_full\zlib_api" /I "..\src_full\geotiff_api" /I "..\src_full\tiff_api" /D "_DEBUG" /D "COMPILE_WITH_GUI" /D "COMPILE_WITH_MULTI_CORE" /D "WIN32" /D "_CONSOLE" /D "_MBCS" /YX /FD /GZ /c
 # ADD BASE RSC /l 0x409 /i "..\..\src" /d "_DEBUG"
 # ADD RSC /l 0x409 /i "..\..\src" /d "_DEBUG"
 BSC32=bscmake.exe
@@ -138,7 +138,7 @@ BSC32=bscmake.exe
 # ADD BSC32 /nologo
 LINK32=link.exe
 # ADD BASE LINK32 ../laslib/libD/LASlib.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /pdbtype:sept
-# ADD LINK32 ../laslib/lib/LASlibD.lib ../src_full/glui_api/glui32.lib ../src_full/glut_api/glutstatic.lib ../src_full/glut_api/glut32.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /pdbtype:sept
+# ADD LINK32 ../laslib/lib/LASlibD.lib ../src_full/glui_api/glui32.lib ../src_full/glut_api/glutstatic.lib ../src_full/glut_api/glut32.lib ../src_full/png_api/libpng.lib ../src_full/zlib_api/zlib.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /nologo /subsystem:console /debug /machine:I386 /pdbtype:sept
 # Begin Special Build Tool
 SOURCE="$(InputPath)"
 PostBuild_Cmds=copy Debug\lasmerge.exe ..\bin\lasmerge.exe
@@ -155,6 +155,10 @@ PostBuild_Cmds=copy Debug\lasmerge.exe ..\bin\lasmerge.exe
 # Begin Group "Source Files"
 
 # PROP Default_Filter "cpp;c;cxx;rc;def;r;odl;idl;hpj;bat"
+# Begin Source File
+
+SOURCE=..\src_full\dbfreader.cpp
+# End Source File
 # Begin Source File
 
 SOURCE=.\geoprojectionconverter.cpp
@@ -203,6 +207,10 @@ SOURCE=..\src_full\lasmerge_gui.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=..\src_full\lasmerge_multi_core.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\src_full\lasoccupancy.cpp
 
 !IF  "$(CFG)" == "lasmerge - Win32 Release without GUI"
@@ -241,7 +249,30 @@ SOURCE=..\src_full\lastools_gui.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=..\src_full\lastools_multi_core.cpp
+# End Source File
+# Begin Source File
+
 SOURCE=..\src_full\shpreader.cpp
+
+!IF  "$(CFG)" == "lasmerge - Win32 Release without GUI"
+
+# PROP Exclude_From_Build 1
+
+!ELSEIF  "$(CFG)" == "lasmerge - Win32 Debug without GUI"
+
+# PROP Exclude_From_Build 1
+
+!ELSEIF  "$(CFG)" == "lasmerge - Win32 Release"
+
+!ELSEIF  "$(CFG)" == "lasmerge - Win32 Debug"
+
+!ENDIF 
+
+# End Source File
+# Begin Source File
+
+SOURCE=..\src_full\sr_api\srreader_png.cpp
 
 !IF  "$(CFG)" == "lasmerge - Win32 Release without GUI"
 
@@ -264,7 +295,15 @@ SOURCE=..\src_full\shpreader.cpp
 # PROP Default_Filter "h;hpp;hxx;hm;inl"
 # Begin Source File
 
+SOURCE=..\src_full\dbfreader.hpp
+# End Source File
+# Begin Source File
+
 SOURCE=.\geoprojectionconverter.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasattributer.hpp
 # End Source File
 # Begin Source File
 
@@ -276,7 +315,19 @@ SOURCE=..\laslib\inc\lasfilter.hpp
 # End Source File
 # Begin Source File
 
-SOURCE=..\laslib\inc\lasinterval.hpp
+SOURCE=..\LASlib\inc\lasignore.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasindex.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasinterval.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\src_full\laslicense.hpp
 # End Source File
 # Begin Source File
 
@@ -288,7 +339,15 @@ SOURCE=..\src_full\lasoccupancy.hpp
 # End Source File
 # Begin Source File
 
-SOURCE=..\laslib\inc\lasquadtree.hpp
+SOURCE=..\LASzip\src\laspoint.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasquadtree.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\LASzip\src\lasquantizer.hpp
 # End Source File
 # Begin Source File
 
@@ -297,10 +356,6 @@ SOURCE=..\src_full\lasraster.hpp
 # Begin Source File
 
 SOURCE=..\laslib\inc\lasreader.hpp
-# End Source File
-# Begin Source File
-
-SOURCE=..\laslib\inc\lasspatial.hpp
 # End Source File
 # Begin Source File
 
@@ -324,11 +379,11 @@ SOURCE=..\laslib\inc\laswriter.hpp
 # End Source File
 # Begin Source File
 
-SOURCE=..\laslib\inc\laszip.hpp
+SOURCE=..\LASzip\src\laszip.hpp
 # End Source File
 # Begin Source File
 
-SOURCE=..\LASzip\src\laszip.hpp
+SOURCE=..\LASzip\src\laszip_decompress_selective_v3.hpp
 # End Source File
 # Begin Source File
 
@@ -341,6 +396,14 @@ SOURCE=..\LASzip\src\mydefs.hpp
 # Begin Source File
 
 SOURCE=..\src_full\shpreader.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\src_full\sr_api\srreader.hpp
+# End Source File
+# Begin Source File
+
+SOURCE=..\src_full\sr_api\srreader_png.hpp
 # End Source File
 # Begin Source File
 
