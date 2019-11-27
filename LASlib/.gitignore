@@ -4,3 +4,7 @@ LASlib.ncb
 LASlib.opt
 LASlib.plg
 *~
+*.vcxproj.user
+*.suo
+*.user
+*.sdf
